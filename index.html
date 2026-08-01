@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1E5F5B">
+<title>DecoHexa</title>
+<meta name="description" content="Camera and image barcode / QR / Aztec scanner">
+<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-theme="light">
+
+<div id="app">
+
+  <!-- ============ PRIMARY NAV RAIL ============ -->
+  <nav class="rail" aria-label="Primary">
+    <div class="rail__brand" aria-hidden="true">
+      <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="3" height="10"></rect><rect x="8" y="7" width="1.5" height="10"></rect><rect x="11" y="7" width="3" height="10"></rect><rect x="16" y="7" width="1.5" height="10"></rect><rect x="19" y="7" width="2" height="10"></rect></svg>
+    </div>
+
+    <button class="rail__item is-active" id="nav-scan" data-view="scan" aria-current="page">
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="8" y="8" width="8" height="8" rx="1"></rect></svg>
+      <span>Scan</span>
+    </button>
+    <button class="rail__item" id="nav-generate" data-view="generate">
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><line x1="14" y1="14" x2="14" y2="21"></line><line x1="21" y1="14" x2="21" y2="21"></line><line x1="14" y1="17.5" x2="21" y2="17.5"></line></svg>
+      <span>Generate</span>
+    </button>
+    <button class="rail__item" id="nav-history" data-view="history">
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 16 14"></polyline></svg>
+      <span>History</span>
+      <span class="rail__badge" id="nav-history-badge" hidden>0</span>
+    </button>
+
+    <div class="rail__spacer"></div>
+
+    <button class="rail__item rail__item--settings" id="btn-settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <main class="stage">
+
+    <!-- ============ SCAN VIEW ============ -->
+    <section class="view is-active" id="view-scan" data-view-panel="scan">
+      <header class="stage__header">
+        <h1>Scan</h1>
+        <div class="live-indicator" id="live-indicator">
+          <span class="live-indicator__dot" id="live-dot"></span>
+          <span id="viewport-status-label">Idle</span>
+        </div>
+      </header>
+
+      <div class="scan-layout">
+        <div class="scan-stage">
+          <div class="viewfinder" id="viewport-wrap">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="scan-canvas"></canvas>
+
+            <div class="viewfinder-flash"></div>
+            <div class="reticle" id="reticle">
+              <span class="reticle__corner tl"></span>
+              <span class="reticle__corner tr"></span>
+              <span class="reticle__corner bl"></span>
+              <span class="reticle__corner br"></span>
+            </div>
+            <div class="scanline" id="scanline"></div>
+
+            <div class="viewfinder__empty" id="viewport-empty">
+              Point the camera at a code, or drop an image below.
+            </div>
+
+            <div class="viewfinder__error" id="viewport-error">
+              <div class="viewfinder__error-title" id="viewport-error-title">Camera unavailable</div>
+              <div class="viewfinder__error-body" id="viewport-error-body">Reason and fix instructions will appear here.</div>
+            </div>
+          </div>
+
+          <div class="shutter-bar">
+            <button class="chip-btn" id="btn-switch-camera" title="Switch camera" hidden>
+              <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+              Switch
+            </button>
+
+            <button class="shutter" id="btn-toggle-scan" aria-label="Start scanning" title="Start / stop scanning">
+              <span class="shutter__ring"></span>
+              <svg id="btn-toggle-scan-icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            </button>
+
+            <button class="chip-btn chip-btn--toggle" id="btn-torch" title="Toggle torch" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M8 6h11a1 1 0 0 1 1 1v3.34a5 5 0 0 1-1.46 3.54L12 19"></path></svg>
+              Torch
+            </button>
+
+            <button class="chip-btn chip-btn--toggle" id="btn-batch-mode" title="Batch mode: log every unique code without dismissing" aria-pressed="false">
+              Batch
+            </button>
+          </div>
+
+          <label class="uploader" id="dropzone" for="input-upload">
+            <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <span class="dropzone__text">Drop an image, or <span class="uploader__link" id="btn-upload-link">browse files</span></span>
+            <input type="file" id="input-upload" accept="image/*" hidden>
+          </label>
+        </div>
+
+        <aside class="capture-panel" id="capture-panel" aria-label="Latest capture">
+          <div class="capture-panel__empty" id="result-empty">Nothing captured yet this session.</div>
+
+          <div id="result-body" hidden>
+            <div class="capture-card__badges" id="capture-badges">
+              <span class="badge" id="result-badge-format" hidden>—</span>
+              <span class="badge badge--success" id="result-badge-valid" hidden>Valid</span>
+              <span class="badge badge--danger" id="result-badge-invalid" hidden>Invalid</span>
+              <span class="badge badge--warning" id="result-badge-dupe" hidden>Duplicate</span>
+            </div>
+
+            <div class="capture-card__text mono" id="result-readout">—</div>
+
+            <dl class="capture-card__fields" id="result-fields"></dl>
+
+            <details class="capture-card__raw">
+              <summary>Raw text</summary>
+              <pre id="result-raw-text" class="mono"></pre>
+            </details>
+
+            <div class="capture-card__actions">
+              <button class="btn btn--sm btn--ghost" id="btn-copy-result">Copy</button>
+              <button class="btn btn--sm btn--ghost" id="btn-copy-details" hidden>Copy details</button>
+              <button class="btn btn--sm btn--ghost" id="btn-export-txt">Export .txt</button>
+              <button class="btn btn--sm btn--ghost" id="btn-export-json">Export .json</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ GENERATE VIEW ============ -->
+    <section class="view" id="view-generate" data-view-panel="generate" hidden>
+      <header class="stage__header"><h1>Generate</h1></header>
+
+      <div class="generate-layout">
+        <div class="generate-form">
+          <label class="field-label" for="generator-format">Barcode format</label>
+          <select class="field" id="generator-format"></select>
+          <p class="field-hint" id="generator-format-hint"></p>
+
+          <label class="field-label" for="generator-text">Text to encode</label>
+          <textarea class="field field--textarea" id="generator-text" placeholder="Type or paste text, a URL, Wi-Fi details, anything…"></textarea>
+
+          <button class="btn btn--primary" id="btn-generate" style="margin-top:14px;">Generate barcode</button>
+        </div>
+
+        <div class="generate-preview">
+          <div class="generate-preview__canvas-wrap">
+            <canvas id="generator-canvas" width="220" height="220"></canvas>
+          </div>
+          <p class="generate-preview__hint" id="generator-hint">Enter text and generate to preview here.</p>
+          <button class="btn btn--ghost" id="btn-generator-download" hidden>Download PNG</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY VIEW ============ -->
+    <section class="view" id="view-history" data-view-panel="history" hidden>
+      <header class="stage__header">
+        <h1>History <span class="count-pill" id="history-count">0</span></h1>
+        <div class="history-controls">
+          <input class="field field--search" type="search" id="history-search" placeholder="Search history…">
+          <select class="field" id="history-filter-format" aria-label="Filter by format">
+            <option value="">All formats</option>
+          </select>
+        </div>
+      </header>
+
+      <ul class="history-list" id="history-list">
+        <li class="history-empty" id="history-empty">Nothing scanned yet.</li>
+      </ul>
+
+      <div class="history-footer">
+        <button class="btn btn--ghost" id="btn-history-export-csv">Export CSV</button>
+        <button class="btn btn--ghost" id="btn-history-export-json">Export JSON</button>
+        <button class="btn btn--danger-ghost" id="btn-history-clear">Clear history</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ SETTINGS PANEL ============ -->
+<div class="scrim" id="settings-scrim"></div>
+<aside class="settings-panel" id="settings-drawer" aria-label="Settings">
+  <div class="settings-panel__header">
+    <h2>Settings</h2>
+    <button class="icon-btn" id="btn-settings-close" aria-label="Close settings">
+      <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+  </div>
+
+  <div class="settings-panel__body">
+
+    <section class="settings-card">
+      <h3>Appearance</h3>
+      <div class="settings-row">
+        <div>
+          <p class="settings-row__label">Dark theme</p>
+          <p class="settings-row__hint">Switch between light and dark</p>
+        </div>
+        <button class="switch" id="switch-theme" role="switch" aria-checked="false"></button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h3>Feedback</h3>
+      <div class="settings-row">
+        <p class="settings-row__label">Sound on scan</p>
+        <button class="switch is-on" id="switch-sound" role="switch" aria-checked="true"></button>
+      </div>
+      <div class="settings-row">
+        <p class="settings-row__label">Vibration on scan</p>
+        <button class="switch is-on" id="switch-vibration" role="switch" aria-checked="true"></button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h3>Scanning</h3>
+      <div class="settings-row">
+        <div>
+          <p class="settings-row__label">Batch mode</p>
+          <p class="settings-row__hint">Log every new unique code automatically</p>
+        </div>
+        <button class="switch" id="switch-batch" role="switch" aria-checked="false"></button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h3>Custom label rules</h3>
+      <p class="settings-row__hint" style="margin-bottom:10px;">
+        Auto-label codes matching a pattern, e.g. <code class="mono">^SKU-\d{6}$</code>
+      </p>
+      <input class="field" id="settings-rule-name" placeholder="Label (e.g. Internal SKU)">
+      <input class="field mono" id="settings-rule-regex" placeholder="Regex, e.g. ^SKU-\d{6}$">
+      <button class="btn btn--sm btn--ghost" id="btn-add-rule">Add rule</button>
+      <ul class="rule-list" id="settings-rule-list"></ul>
+    </section>
+
+    <section class="settings-card">
+      <h3>Keyboard shortcuts</h3>
+      <div class="kbd-list">
+        <div><span>Toggle scanning</span><kbd>Space</kbd></div>
+        <div><span>Copy last result</span><kbd>C</kbd></div>
+        <div><span>Export last result</span><kbd>E</kbd></div>
+      </div>
+    </section>
+
+  </div>
+</aside>
+
+<!-- ============ TOAST + CONFIRM (replaces native alert/confirm) ============ -->
+<div class="toast-stack" id="toast-stack"></div>
+<div class="confirm-scrim" id="confirm-scrim"></div>
+<div class="confirm-modal" id="confirm-modal" role="alertdialog" aria-modal="true">
+  <p class="confirm-modal__message" id="confirm-modal-message"></p>
+  <div class="confirm-modal__actions">
+    <button class="btn btn--ghost" id="confirm-modal-cancel">Cancel</button>
+    <button class="btn btn--danger" id="confirm-modal-ok">Confirm</button>
+  </div>
+</div>
+
+<!-- ============ App state contract (see build spec) ============ -->
+<script>
+  window.ScannerApp = window.ScannerApp || {
+    state: {
+      currentResult: null,
+      history: [],
+      settings: { sound: true, vibration: true, theme: 'light', batchMode: false }
+    },
+    camera: {},
+    decoder: {},
+    parsers: {},
+    validators: {},
+    history: {},
+    settings: {},
+    generator: {},
+    ui: {}
+  };
+</script>
+
+<!-- ZXing-WASM — vendored locally, unchanged from prior build -->
+<script src="js/vendor/zxing-wasm-full.js"></script>
+<script src="js/zxing-loader.js"></script>
+
+<!-- Shared UI chrome: nav switching, toast + confirm dialogs -->
+<script src="js/ui.js"></script>
+
+<!-- App scripts -->
+<script src="js/camera.js"></script>
+<script src="js/decoder.js"></script>
+<script src="js/parsers.js"></script>
+<script src="js/validators.js"></script>
+<script src="js/history.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/custom-select.js"></script>
+<script src="js/app.js"></script>
+
+<!-- Registers sw.js so the app shell actually gets cached for offline use.
+     Feature-detected since older browsers don't support service workers at
+     all; deferred to 'load' so it never competes with the app's own
+     startup work (camera/decoder init) for the main thread. -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function (err) {
+        console.warn('Service worker registration failed:', err);
+      });
+    });
+  }
+</script>
+
+</body>
+</html>
