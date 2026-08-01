@@ -23,6 +23,25 @@
   var navButtons = Array.prototype.slice.call(document.querySelectorAll('.rail__item[data-view]'));
   var views = Array.prototype.slice.call(document.querySelectorAll('.view[data-view-panel]'));
 
+  // On phones (see styles.css's 720px breakpoint), .rail switches from a
+  // left sidebar to a sticky top bar — so any other sticky element below it
+  // (currently just History's date-group headers) needs to stick *under*
+  // it, not at the same top:0. The bar's height isn't a fixed value in CSS
+  // (it scales with font size/icon size), so it's measured here and
+  // published as a custom property rather than duplicating a guessed
+  // pixel number in styles.css that would silently drift out of sync.
+  var railEl = document.querySelector('.rail');
+  var mobileNavQuery = window.matchMedia('(max-width: 720px)');
+
+  function syncStickyNavOffset() {
+    var isTopBar = mobileNavQuery.matches;
+    var h = (isTopBar && railEl) ? railEl.getBoundingClientRect().height : 0;
+    document.documentElement.style.setProperty('--sticky-nav-offset', h + 'px');
+  }
+  syncStickyNavOffset();
+  window.addEventListener('resize', syncStickyNavOffset);
+  window.addEventListener('orientationchange', syncStickyNavOffset);
+
   function setView(name) {
     views.forEach(function (v) {
       var active = v.getAttribute('data-view-panel') === name;
@@ -131,4 +150,40 @@
     return dateLabel + ', ' + time;
   }
   App.ui.formatHistoryTimestamp = formatHistoryTimestamp;
+
+  // Label for a History sticky date-group header ("Today", "Yesterday", or
+  // a short date) — the day-level counterpart to formatHistoryTimestamp,
+  // used once per group instead of repeated on every row.
+  function getDateGroupLabel(ts) {
+    var d = new Date(ts);
+    var now = new Date();
+    var dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var entryStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    var dayDiff = Math.round((dayStart - entryStart) / 86400000);
+
+    if (dayDiff === 0) return 'Today';
+    if (dayDiff === 1) return 'Yesterday';
+    var sameYear = d.getFullYear() === now.getFullYear();
+    return d.toLocaleDateString(undefined, sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  App.ui.getDateGroupLabel = getDateGroupLabel;
+
+  // Numeric day-bucket key for the same grouping getDateGroupLabel()
+  // describes. Labels alone aren't safely comparable across renders (two
+  // different years' "Mar 3" would collide), so history.js uses this to
+  // detect when consecutive rows cross a day boundary.
+  function getDateGroupKey(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  }
+  App.ui.getDateGroupKey = getDateGroupKey;
+
+  // Time-only stamp for individual History rows, now that the day context
+  // lives in the sticky group header above them instead of on every row.
+  function formatHistoryTime(ts) {
+    return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  App.ui.formatHistoryTime = formatHistoryTime;
 })();

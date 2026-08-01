@@ -124,7 +124,25 @@
     if (matchesCurrentFilter(result)) {
       var emptyRow = document.getElementById('history-empty');
       if (emptyRow) emptyRow.remove();
-      els.list.insertBefore(buildItem(result), els.list.firstChild);
+
+      // A brand-new entry is always the most recent, so it always belongs
+      // at the very top. If the current top-of-list header already covers
+      // today, just insert the row under it; otherwise (empty list, or the
+      // last scan was on a previous day — e.g. crossing midnight) insert a
+      // fresh header too, so the header-per-group invariant render() relies
+      // on never drifts out of sync on this fast path.
+      var todayKey = App.ui.getDateGroupKey(result.timestamp);
+      var topNode = els.list.firstChild;
+      var topIsTodayHeader = topNode && topNode.classList &&
+        topNode.classList.contains('history-date-header') &&
+        Number(topNode.dataset.groupKey) === todayKey;
+
+      if (topIsTodayHeader) {
+        els.list.insertBefore(buildItem(result), topNode.nextSibling);
+      } else {
+        els.list.insertBefore(buildDateHeader(App.ui.getDateGroupLabel(result.timestamp), todayKey), topNode);
+        els.list.insertBefore(buildItem(result), topNode);
+      }
       updateCounts();
     } else {
       render();
@@ -212,10 +230,33 @@
       return;
     }
 
-    // getFiltered() already returns newest-first.
+    // getFiltered() already returns newest-first; walk it once, inserting
+    // a sticky date header whenever the day changes instead of repeating
+    // the date on every row (each row now shows only a time — see
+    // buildItem()).
+    var lastGroupKey = null;
     for (var i = 0; i < filtered.length; i++) {
-      els.list.appendChild(buildItem(filtered[i]));
+      var entry = filtered[i];
+      var groupKey = App.ui.getDateGroupKey(entry.timestamp);
+      if (groupKey !== lastGroupKey) {
+        els.list.appendChild(buildDateHeader(App.ui.getDateGroupLabel(entry.timestamp), groupKey));
+        lastGroupKey = groupKey;
+      }
+      els.list.appendChild(buildItem(entry));
     }
+  }
+
+  // Sticky separator between days' worth of rows. groupKey is stashed on
+  // the node itself (rather than recomputed from label text) so add()'s
+  // fast path can cheaply check "is the top group already today?" without
+  // re-parsing a display string.
+  function buildDateHeader(label, groupKey) {
+    var li = document.createElement('li');
+    li.className = 'history-date-header';
+    li.textContent = label;
+    li.setAttribute('role', 'separator');
+    li.dataset.groupKey = String(groupKey);
+    return li;
   }
 
   function appendEmptyRow(text) {
@@ -231,8 +272,8 @@
     item.className = 'history-item' +
       (entry === activeEntry ? ' is-active' : '') +
       (entry === expandedEntry ? ' is-expanded' : '');
-    var time = (App.ui && App.ui.formatHistoryTimestamp)
-      ? App.ui.formatHistoryTimestamp(entry.timestamp)
+    var time = (App.ui && App.ui.formatHistoryTime)
+      ? App.ui.formatHistoryTime(entry.timestamp)
       : new Date(entry.timestamp).toLocaleTimeString();
 
     var badges = '';

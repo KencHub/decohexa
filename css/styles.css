@@ -504,7 +504,24 @@ button { font-family: inherit; }
 .history-list {
   list-style: none; margin: 0 0 18px; padding: 0;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  overflow: hidden;
+}
+/* Rounded-card look without overflow:hidden — overflow:hidden on this
+   ancestor was clipping the box for the rounded corners, but it also
+   silently breaks position:sticky on .history-date-header below (any
+   ancestor with overflow != visible becomes sticky's containing block for
+   scroll purposes, and since .history-list itself never scrolls, the
+   header just sat there static instead of pinning to the viewport as the
+   page scrolled — confirmed on-device). Applying the radius to whichever
+   element is currently first/last achieves the same visual without that
+   side effect, and stays correct automatically as headers/rows are added
+   or removed. */
+.history-list > *:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.history-list > *:last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); overflow: hidden; }
+.history-date-header {
+  position: sticky; top: var(--sticky-nav-offset, 0px); z-index: 2;
+  padding: 7px 18px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-faint);
+  background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .history-item {
   padding: 13px 18px; border-bottom: 1px solid var(--border);
