@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,6 +11,20 @@
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body data-theme="light">
+<script>
+  // Runs before any visible markup below is parsed/painted, so a saved
+  // dark-theme preference applies immediately instead of flashing light
+  // first. Mirrors settings.js's own THEME_STORAGE_KEY / applyTheme logic —
+  // keep this in sync if that key ever changes.
+  (function () {
+    try {
+      if (window.localStorage.getItem('scannerapp_theme') === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.body.setAttribute('data-theme', 'dark');
+      }
+    } catch (err) { /* storage unavailable — default light stands */ }
+  })();
+</script>
 
 <div id="app">
 
@@ -61,7 +75,6 @@
         <div class="scan-stage">
           <div class="viewfinder" id="viewport-wrap">
             <video id="video" autoplay playsinline muted></video>
-            <canvas id="scan-canvas"></canvas>
 
             <div class="viewfinder-flash"></div>
             <div class="reticle" id="reticle">
@@ -222,7 +235,7 @@
           <p class="settings-row__label">Dark theme</p>
           <p class="settings-row__hint">Switch between light and dark</p>
         </div>
-        <button class="switch" id="switch-theme" role="switch" aria-checked="false"></button>
+        <button class="switch" id="switch-theme" role="switch" aria-checked="false" aria-label="Dark theme"></button>
       </div>
     </section>
 
@@ -230,11 +243,11 @@
       <h3>Feedback</h3>
       <div class="settings-row">
         <p class="settings-row__label">Sound on scan</p>
-        <button class="switch is-on" id="switch-sound" role="switch" aria-checked="true"></button>
+        <button class="switch is-on" id="switch-sound" role="switch" aria-checked="true" aria-label="Sound on scan"></button>
       </div>
       <div class="settings-row">
         <p class="settings-row__label">Vibration on scan</p>
-        <button class="switch is-on" id="switch-vibration" role="switch" aria-checked="true"></button>
+        <button class="switch is-on" id="switch-vibration" role="switch" aria-checked="true" aria-label="Vibration on scan"></button>
       </div>
     </section>
 
@@ -245,7 +258,7 @@
           <p class="settings-row__label">Batch mode</p>
           <p class="settings-row__hint">Log every new unique code automatically</p>
         </div>
-        <button class="switch" id="switch-batch" role="switch" aria-checked="false"></button>
+        <button class="switch" id="switch-batch" role="switch" aria-checked="false" aria-label="Batch mode"></button>
       </div>
     </section>
 

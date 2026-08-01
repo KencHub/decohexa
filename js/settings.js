@@ -17,7 +17,8 @@
       normal decode -> parse -> validate -> history pipeline finishes, and a
       small extra badge is shown alongside the format/valid/duplicate badges.
    3) Both light and dark themes are defined natively in css/styles.css via
-      body[data-theme], so no runtime stylesheet injection is needed.
+      html[data-theme]/body[data-theme], so no runtime stylesheet injection
+      is needed.
    ========================================================================== */
 
 (function () {
@@ -46,6 +47,9 @@
 
   var RULES_STORAGE_KEY = 'scannerapp_custom_rules';
   var THEME_STORAGE_KEY = 'scannerapp_theme';
+  var SOUND_STORAGE_KEY = 'scannerapp_sound';
+  var VIBRATION_STORAGE_KEY = 'scannerapp_vibration';
+  var BATCH_MODE_STORAGE_KEY = 'scannerapp_batch_mode';
 
   // ---- panel open/close -----------------------------------------------------
   function openPanel() {
@@ -77,10 +81,16 @@
       els.btnBatchModeMain.classList.toggle('is-on', on);
       els.btnBatchModeMain.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
+    // Covers both entry points to batchMode changing: the drawer switch
+    // (via toggle() below) and the shutter-bar button, which app.js flips
+    // on App.state.settings.batchMode directly and then calls this same
+    // function to resync — see the btnBatchModeMain listener further down.
+    try { window.localStorage.setItem(BATCH_MODE_STORAGE_KEY, on ? '1' : '0'); } catch (err) { /* storage unavailable */ }
   }
 
   function applyTheme() {
     var isDark = App.state.settings.theme === 'dark';
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
     setSwitchVisual(els.switchTheme, isDark);
   }
@@ -96,8 +106,14 @@
     }
     if (key === 'sound' || key === 'vibration' || key === 'batchMode') {
       s[key] = !s[key];
-      if (key === 'sound') setSwitchVisual(els.switchSound, s.sound);
-      if (key === 'vibration') setSwitchVisual(els.switchVibration, s.vibration);
+      if (key === 'sound') {
+        setSwitchVisual(els.switchSound, s.sound);
+        try { window.localStorage.setItem(SOUND_STORAGE_KEY, s.sound ? '1' : '0'); } catch (err) { /* storage unavailable */ }
+      }
+      if (key === 'vibration') {
+        setSwitchVisual(els.switchVibration, s.vibration);
+        try { window.localStorage.setItem(VIBRATION_STORAGE_KEY, s.vibration ? '1' : '0'); } catch (err) { /* storage unavailable */ }
+      }
       if (key === 'batchMode') syncBatchModeUI();
       return s[key];
     }
@@ -262,6 +278,21 @@
   try {
     var savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (savedTheme === 'light' || savedTheme === 'dark') App.state.settings.theme = savedTheme;
+  } catch (err) { /* storage unavailable — keep default */ }
+
+  try {
+    var savedSound = window.localStorage.getItem(SOUND_STORAGE_KEY);
+    if (savedSound === '0' || savedSound === '1') App.state.settings.sound = savedSound === '1';
+  } catch (err) { /* storage unavailable — keep default */ }
+
+  try {
+    var savedVibration = window.localStorage.getItem(VIBRATION_STORAGE_KEY);
+    if (savedVibration === '0' || savedVibration === '1') App.state.settings.vibration = savedVibration === '1';
+  } catch (err) { /* storage unavailable — keep default */ }
+
+  try {
+    var savedBatchMode = window.localStorage.getItem(BATCH_MODE_STORAGE_KEY);
+    if (savedBatchMode === '0' || savedBatchMode === '1') App.state.settings.batchMode = savedBatchMode === '1';
   } catch (err) { /* storage unavailable — keep default */ }
 
   applyTheme();

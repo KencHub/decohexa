@@ -91,10 +91,45 @@
   }
 
   // ---- public API -----------------------------------------------------------
+  function matchesCurrentFilter(entry) {
+    var query = (els.search.value || '').trim().toLowerCase();
+    var format = els.filterFormat.value;
+    if (format && entry.format !== format) return false;
+    if (!query) return true;
+    return entry.rawText.toLowerCase().indexOf(query) !== -1 ||
+           entry.format.toLowerCase().indexOf(query) !== -1;
+  }
+
+  function updateCounts() {
+    var full = App.state.history;
+    var filteredCount = getFiltered().length;
+    els.count.textContent = (filteredCount === full.length)
+      ? String(full.length)
+      : filteredCount + ' / ' + full.length;
+    if (els.railBadge) {
+      els.railBadge.hidden = full.length === 0;
+      els.railBadge.textContent = full.length > 99 ? '99+' : String(full.length);
+    }
+  }
+
   function add(result) {
     App.state.history.push(result);
     trackFormat(result.format);
-    render();
+
+    // Fast path: a full render() rebuilds every row in the list, which
+    // gets slower as history grows — a real problem for Batch mode, whose
+    // whole purpose is logging many scans in one session. When the new
+    // entry would land at the top of the currently-filtered view anyway,
+    // just insert that one row instead of rebuilding everything.
+    if (matchesCurrentFilter(result)) {
+      var emptyRow = document.getElementById('history-empty');
+      if (emptyRow) emptyRow.remove();
+      els.list.insertBefore(buildItem(result), els.list.firstChild);
+      updateCounts();
+    } else {
+      render();
+    }
+
     persistAdd(result);
   }
 
@@ -164,14 +199,7 @@
     var full = App.state.history;
     var filtered = getFiltered();
 
-    els.count.textContent = (filtered.length === full.length)
-      ? String(full.length)
-      : filtered.length + ' / ' + full.length;
-
-    if (els.railBadge) {
-      els.railBadge.hidden = full.length === 0;
-      els.railBadge.textContent = full.length > 99 ? '99+' : String(full.length);
-    }
+    updateCounts();
 
     els.list.innerHTML = '';
 
