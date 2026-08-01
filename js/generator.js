@@ -24,11 +24,19 @@
     format: document.getElementById('generator-format'),
     formatHint: document.getElementById('generator-format-hint'),
     text: document.getElementById('generator-text'),
+    decodePreview: document.getElementById('generator-decode-preview'),
+    base64Row: document.getElementById('generator-base64-row'),
+    base64Switch: document.getElementById('switch-generator-base64'),
     btnGenerate: document.getElementById('btn-generate'),
     canvas: document.getElementById('generator-canvas'),
     hint: document.getElementById('generator-hint'),
     btnDownload: document.getElementById('btn-generator-download')
   };
+
+  // Whether the "Encode as base64" toggle is on. Deliberately not persisted
+  // (matches the rest of the Generate form, which is scratch/session input,
+  // not a saved setting) — starts off on every load.
+  var base64Enabled = false;
 
   var DEFAULT_HINT = 'Enter text and generate to preview here.';
 
@@ -66,6 +74,28 @@
     UPCE: 'Digits only — exactly 6 to 8, a compressed product barcode number.'
   };
 
+  // Formats whose character set can't hold base64 output (mixed case,
+  // '+' '/' '=') — the digit-only product-barcode formats, plus Code39
+  // (uppercase + a small symbol set only). Everything else here is
+  // effectively byte-capable, including Code128 (full ASCII).
+  var BASE64_UNSUPPORTED_FORMATS = ['Code39', 'EAN13', 'EAN8', 'UPCA', 'UPCE'];
+
+  // Mirrors the `type` values parsers.js returns, for the live "will be
+  // recognized as" preview below. Kept here rather than imported from
+  // parsers.js since it's just display copy, not logic.
+  var TYPE_LABELS = {
+    jwt: 'JWT',
+    wifi: 'WiFi network',
+    vcard: 'Contact card (vCard)',
+    url: 'URL / link',
+    json: 'JSON',
+    base64json: 'Encoded JSON (base64)',
+    base64text: 'Encoded text (base64)',
+    text: 'Plain text'
+  };
+
+  var FORMAT_STORAGE_KEY = 'scannerapp-generator-format';
+
   // ---- format dropdown population -----------------------------------------
   (function populateFormatSelect() {
     if (!els.format) return;
@@ -75,7 +105,10 @@
       opt.textContent = fmt.label;
       els.format.appendChild(opt);
     });
-    els.format.value = 'QRCode';
+    var saved = null;
+    try { saved = window.localStorage.getItem(FORMAT_STORAGE_KEY); } catch (err) { /* storage unavailable */ }
+    var savedIsValid = saved && GENERATE_FORMATS.some(function (fmt) { return fmt.value === saved; });
+    els.format.value = savedIsValid ? saved : 'QRCode';
   })();
 
   function updateFormatHint() {
@@ -83,6 +116,75 @@
     els.formatHint.textContent = FORMAT_HINTS[els.format.value] || '';
   }
   updateFormatHint();
+
+  // ---- base64 encode toggle -------------------------------------------------
+
+  // Standard base64 (not base64url) — matches what tryParseBase64 in
+  // parsers.js accepts (its alphabet check allows both '+/' and '-_').
+  function utf8ToBase64(str) {
+    var bytes = new TextEncoder().encode(str);
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function setBase64SwitchVisual(on) {
+    if (!els.base64Switch) return;
+    els.base64Switch.classList.toggle('is-on', !!on);
+    els.base64Switch.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+
+  // Hides/disables the toggle for formats that can't physically hold
+  // base64 output (digit-only barcodes, Code39's restricted charset), and
+  // turns it back off automatically if the user switches into one of those
+  // formats while it was on — so a stale "on" state can't silently break
+  // the next generate() call.
+  function updateBase64Availability() {
+    if (!els.base64Row) return;
+    var format = els.format ? els.format.value : 'QRCode';
+    var supported = BASE64_UNSUPPORTED_FORMATS.indexOf(format) === -1;
+    els.base64Row.hidden = !supported;
+    if (!supported && base64Enabled) {
+      base64Enabled = false;
+      setBase64SwitchVisual(false);
+    }
+  }
+
+  if (els.base64Switch) {
+    els.base64Switch.addEventListener('click', function () {
+      base64Enabled = !base64Enabled;
+      setBase64SwitchVisual(base64Enabled);
+      updateDecodePreview();
+      resetHint(); // the barcode's actual payload would change — any drawn canvas is now stale
+    });
+  }
+
+  // ---- live "will be recognized as" preview ----------------------------------
+  // Runs the exact same parser scanning uses (App.parsers.parse) against
+  // whatever's currently in the text box — encoded first if the base64
+  // toggle is on — so what you see here is a true preview of what scanning
+  // the generated code back would show, not a separate reimplementation
+  // that could drift from the real detection logic.
+  function updateDecodePreview() {
+    if (!els.decodePreview) return;
+    var raw = els.text.value.trim();
+    if (!raw) { els.decodePreview.textContent = ''; return; }
+
+    var toCheck = raw;
+    if (base64Enabled) {
+      try {
+        toCheck = utf8ToBase64(raw);
+      } catch (err) {
+        els.decodePreview.textContent = '';
+        return;
+      }
+    }
+
+    if (!App.parsers || !App.parsers.parse) return;
+    var parsed = App.parsers.parse(toCheck);
+    var label = (parsed && TYPE_LABELS[parsed.type]) || 'Plain text';
+    els.decodePreview.textContent = 'Will be recognized as: ' + label;
+  }
 
   // ---- rendering ------------------------------------------------------------
   // Drawn black-on-white deliberately (ignoring the current theme) because a
@@ -119,13 +221,22 @@
   /**
    * Encode `text` as `format` (defaults to "QRCode") and draw it onto the
    * generator canvas. Returns a Promise resolving to the canvas element.
+   *
+   * `options.base64` (optional, default false): base64-encode `text` before
+   * it goes into the barcode, so the readable input becomes a decodable
+   * blob — the same shape parsers.js's base64json/base64text detection
+   * reads back out on scan (e.g. ID/claims-style codes).
    */
-  function generate(text, format) {
+  function generate(text, format, options) {
     var value = String(text == null ? '' : text).trim();
     if (!value) {
       var emptyErr = new Error('empty-input');
       emptyErr.code = 'empty-input';
       return Promise.reject(emptyErr);
+    }
+
+    if (options && options.base64) {
+      value = utf8ToBase64(value);
     }
 
     var writerOptions = {
@@ -169,7 +280,7 @@
     els.btnGenerate.disabled = true;
     els.hint.textContent = 'Generating\u2026';
 
-    generate(els.text.value, format)
+    generate(els.text.value, format, { base64: base64Enabled })
       .then(function () {
         if (token !== generationToken) return; // a newer request/edit supersedes this one
         canvasFormat = format;
@@ -210,13 +321,25 @@
     }
     if (canvasFormat !== null) clearCanvas();
   }
-  els.text.addEventListener('input', resetHint);
+  els.text.addEventListener('input', function () {
+    resetHint();
+    updateDecodePreview();
+  });
   if (els.format) {
     els.format.addEventListener('change', function () {
+      try { window.localStorage.setItem(FORMAT_STORAGE_KEY, els.format.value); } catch (err) { /* storage unavailable */ }
       resetHint();
       updateFormatHint();
+      updateBase64Availability();
+      updateDecodePreview();
     });
   }
+
+  // Initial state: no format-specific restriction applied to the toggle yet
+  // (default format is QRCode, which supports it), and nothing typed yet
+  // so the preview starts blank.
+  updateBase64Availability();
+  updateDecodePreview();
 
   window.ScannerApp = window.ScannerApp || {};
   window.ScannerApp.generator = {

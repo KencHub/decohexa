@@ -420,8 +420,10 @@
   });
 
   els.btnBatchMode.addEventListener('click', function () {
+    // Flip the underlying state only. settings.js listens for this same
+    // click and re-syncs both the Scan-page chip and the Settings-page
+    // switch (classList + aria-pressed) via syncBatchModeUI().
     App.state.settings.batchMode = !App.state.settings.batchMode;
-    els.btnBatchMode.classList.toggle('is-on', App.state.settings.batchMode);
   });
 
   // ---- upload / drag-and-drop -----------------------------------------------
@@ -514,21 +516,17 @@
   document.getElementById('btn-export-txt').addEventListener('click', function () {
     var result = App.state.currentResult;
     if (!result) return;
-    downloadResultFile(
-      'scan-result-' + App.ui.formatTimestampForFilename(result.timestamp) + '.txt',
-      buildTxtExportContent(result),
-      'text/plain'
-    );
+    var filename = 'scan-result-' + App.ui.formatTimestampForFilename(result.timestamp) + '.txt';
+    downloadResultFile(filename, buildTxtExportContent(result), 'text/plain');
+    App.ui.toast('Exported ' + filename);
   });
 
   document.getElementById('btn-export-json').addEventListener('click', function () {
     var result = App.state.currentResult;
     if (!result) return;
-    downloadResultFile(
-      'scan-result-' + App.ui.formatTimestampForFilename(result.timestamp) + '.json',
-      JSON.stringify(buildExportObject(result), null, 2),
-      'application/json'
-    );
+    var filename = 'scan-result-' + App.ui.formatTimestampForFilename(result.timestamp) + '.json';
+    downloadResultFile(filename, JSON.stringify(buildExportObject(result), null, 2), 'application/json');
+    App.ui.toast('Exported ' + filename);
   });
 
   // ---- run the startup check once the page is ready --------------------------

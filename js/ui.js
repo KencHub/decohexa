@@ -108,4 +108,27 @@
     return fields.map(function (f) { return f.label + ': ' + f.value; }).join('\n');
   }
   App.ui.fieldsToText = fieldsToText;
+
+  // Formats a timestamp for display in the History list: shows just the time
+  // for entries from today, "Yesterday" + time for yesterday, and a full
+  // date + time for anything older — so two entries at the same clock time
+  // on different days are never visually indistinguishable.
+  function formatHistoryTimestamp(ts) {
+    var d = new Date(ts);
+    var now = new Date();
+    var time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+    var dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var entryStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    var dayDiff = Math.round((dayStart - entryStart) / 86400000);
+
+    if (dayDiff === 0) return time;
+    if (dayDiff === 1) return 'Yesterday, ' + time;
+    var sameYear = d.getFullYear() === now.getFullYear();
+    var dateLabel = d.toLocaleDateString(undefined, sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' });
+    return dateLabel + ', ' + time;
+  }
+  App.ui.formatHistoryTimestamp = formatHistoryTimestamp;
 })();

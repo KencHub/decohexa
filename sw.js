@@ -14,7 +14,10 @@
    affected by any of this either way.
    ========================================================================== */
 
-var CACHE_NAME = 'scanner-shell-v1';
+// Bump this (v2 -> v3 -> ...) any time a file in SHELL_FILES changes.
+// The browser only re-copies the shell files when this string changes —
+// editing history.js/app.js/etc. alone does nothing until this does too.
+var CACHE_NAME = 'scanner-shell-v3';
 
 // Everything the app needs to boot and run with zero network access.
 // ZXing is vendored locally (see index.html's comment on that decision),

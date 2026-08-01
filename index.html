@@ -99,6 +99,7 @@
             </button>
 
             <button class="chip-btn chip-btn--toggle" id="btn-batch-mode" title="Batch mode: log every unique code without dismissing" aria-pressed="false">
+              <span class="chip-btn__dot" id="batch-mode-dot"></span>
               Batch
             </button>
           </div>
@@ -153,6 +154,15 @@
 
           <label class="field-label" for="generator-text">Text to encode</label>
           <textarea class="field field--textarea" id="generator-text" placeholder="Type or paste text, a URL, Wi-Fi details, anything…"></textarea>
+          <p class="field-hint" id="generator-decode-preview"></p>
+
+          <div class="settings-row" id="generator-base64-row">
+            <div>
+              <p class="settings-row__label">Encode as base64</p>
+              <p class="settings-row__hint" id="generator-base64-hint">Scrambles the text into a decodable blob, like ID/claims barcodes</p>
+            </div>
+            <button class="switch" id="switch-generator-base64" role="switch" aria-checked="false"></button>
+          </div>
 
           <button class="btn btn--primary" id="btn-generate" style="margin-top:14px;">Generate barcode</button>
         </div>

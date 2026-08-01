@@ -139,12 +139,18 @@
     var query = (els.search.value || '').trim().toLowerCase();
     var format = els.filterFormat.value;
 
-    return App.state.history.filter(function (entry) {
+    var matches = App.state.history.filter(function (entry) {
       if (format && entry.format !== format) return false;
       if (!query) return true;
       return entry.rawText.toLowerCase().indexOf(query) !== -1 ||
              entry.format.toLowerCase().indexOf(query) !== -1;
     });
+
+    // Newest first. Centralized here (rather than each caller reversing on
+    // its own) so render() and the bulk export functions can't silently
+    // drift out of sync with each other, as they previously did.
+    matches.reverse();
+    return matches;
   }
 
   // ---- rendering --------------------------------------------------------------
@@ -178,8 +184,8 @@
       return;
     }
 
-    // newest first
-    for (var i = filtered.length - 1; i >= 0; i--) {
+    // getFiltered() already returns newest-first.
+    for (var i = 0; i < filtered.length; i++) {
       els.list.appendChild(buildItem(filtered[i]));
     }
   }
@@ -197,7 +203,9 @@
     item.className = 'history-item' +
       (entry === activeEntry ? ' is-active' : '') +
       (entry === expandedEntry ? ' is-expanded' : '');
-    var time = new Date(entry.timestamp).toLocaleTimeString();
+    var time = (App.ui && App.ui.formatHistoryTimestamp)
+      ? App.ui.formatHistoryTimestamp(entry.timestamp)
+      : new Date(entry.timestamp).toLocaleTimeString();
 
     var badges = '';
     if (entry.valid === true) badges += '<span class="badge badge--success">Valid</span>';
@@ -314,7 +322,9 @@
       var content = fields.length
         ? entry.rawText + '\n\n--- Details ---\n' + App.ui.fieldsToText(fields)
         : entry.rawText;
-      download('scan-result-' + App.ui.formatTimestampForFilename(entry.timestamp) + '.txt', content, 'text/plain');
+      var filename = 'scan-result-' + App.ui.formatTimestampForFilename(entry.timestamp) + '.txt';
+      download(filename, content, 'text/plain');
+      App.ui.toast('Exported ' + filename);
     });
 
     var btnJson = document.createElement('button');
@@ -322,11 +332,9 @@
     btnJson.textContent = 'Export .json';
     btnJson.addEventListener('click', function () {
       var exportObj = (App.ui && App.ui.buildExportObject) ? App.ui.buildExportObject(entry) : entry;
-      download(
-        'scan-result-' + App.ui.formatTimestampForFilename(entry.timestamp) + '.json',
-        JSON.stringify(exportObj, null, 2),
-        'application/json'
-      );
+      var filename = 'scan-result-' + App.ui.formatTimestampForFilename(entry.timestamp) + '.json';
+      download(filename, JSON.stringify(exportObj, null, 2), 'application/json');
+      App.ui.toast('Exported ' + filename);
     });
 
     actions.appendChild(btnTxt);
@@ -397,7 +405,9 @@
     // guessing Latin-1/Windows-1252 and mangling the en-dashes/curly quotes
     // that come through from parsed field text (e.g. "arenâ€™t" instead of "aren't").
     var csvContent = '\uFEFF' + lines.join('\n');
-    download('scan-history-' + App.ui.formatTimestampForFilename(Date.now()) + '.csv', csvContent, 'text/csv');
+    var filename = 'scan-history-' + App.ui.formatTimestampForFilename(Date.now()) + '.csv';
+    download(filename, csvContent, 'text/csv');
+    App.ui.toast('Exported ' + filename);
   }
 
   function exportJson() {
@@ -406,11 +416,9 @@
     var exportRows = (App.ui && App.ui.buildExportObject)
       ? rows.map(App.ui.buildExportObject)
       : rows;
-    download(
-      'scan-history-' + App.ui.formatTimestampForFilename(Date.now()) + '.json',
-      JSON.stringify(exportRows, null, 2),
-      'application/json'
-    );
+    var filename = 'scan-history-' + App.ui.formatTimestampForFilename(Date.now()) + '.json';
+    download(filename, JSON.stringify(exportRows, null, 2), 'application/json');
+    App.ui.toast('Exported ' + filename);
   }
 
   // ---- wiring ------------------------------------------------------------------

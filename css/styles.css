@@ -424,7 +424,14 @@ button { font-family: inherit; }
 .chip-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
 .chip-btn:hover { background: var(--surface-sunken); }
 .chip-btn:active { background: var(--surface-sunken); transform: translateY(1px); }
-.chip-btn--toggle.is-on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-strong); }
+.chip-btn--toggle.is-on { background: transparent; border-color: var(--brand); color: var(--brand-strong); }
+.chip-btn__dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
+  transition: background .2s ease;
+  flex-shrink: 0;
+}
+.chip-btn--toggle.is-on .chip-btn__dot { background: var(--brand); }
 
 .uploader {
   display: flex; align-items: center; justify-content: center; gap: 8px;
