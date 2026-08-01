@@ -182,8 +182,8 @@
     });
 
     // Newest first. Centralized here (rather than each caller reversing on
-    // its own) so render() and the bulk export functions can't silently
-    // drift out of sync with each other, as they previously did.
+    // its own) so render() and the bulk export functions can't drift out
+    // of sync with each other.
     matches.reverse();
     return matches;
   }
@@ -251,12 +251,10 @@
       '<div class="history-preview">' + escapeHtml(entry.rawText) + '</div>';
 
     // Tap a row to expand/collapse its full detail *inline, within History*.
-    // This used to force-navigate to Scan and overwrite the live capture
-    // panel with the historical entry — confusing (no cue it wasn't a
-    // fresh scan, silently abandoned whatever view you were on, and could
-    // even interrupt an in-progress scan). History now stays a self-
-    // contained browsable log; Scan's capture panel only ever reflects
-    // the current live session.
+    // History stays a self-contained browsable log; Scan's capture panel
+    // only ever reflects the current live session, so browsing history
+    // never silently interrupts an in-progress scan or gets confused with
+    // a fresh capture.
     item.addEventListener('click', function () {
       expandedEntry = (expandedEntry === entry) ? null : entry;
       activeEntry = entry;

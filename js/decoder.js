@@ -4,23 +4,20 @@
    (stop re-firing the same code while the camera holds steady on it).
 
    Uses zxing-wasm (the real ZXing C++ engine compiled to WebAssembly) via
-   the shared loader in js/zxing-loader.js. As of the Aztec-generation
-   change, this now loads the combined "full" build (reader + writer in
-   one module/one wasm file — js/vendor/zxing-wasm-full.js +
-   js/vendor/zxing_full.wasm) instead of the old reader-only build, since
-   generator.js needs the writer half and both share one instance to avoid
-   fetching/instantiating the ~1.5MB wasm twice. Decoding behavior and the
-   formats read are unchanged.
+   the shared loader in js/zxing-loader.js — the combined "full" build
+   (reader + writer in one module/one wasm file — js/vendor/zxing-wasm-full.js
+   + js/vendor/zxing_full.wasm), since generator.js needs the writer half
+   and both share one instance to avoid fetching/instantiating the ~1.5MB
+   wasm twice.
 
    Public surface (per integration contract — do not rename):
      window.ScannerApp.decoder.decodeFromVideoFrame(videoEl) -> Promise<result | null>
      window.ScannerApp.decoder.decodeFromImage(file)          -> Promise<result>
 
-   NOTE ON THE CONTRACT CHANGE: decodeFromVideoFrame used to return
-   result|null synchronously. zxing-wasm decodes are inherently async (the
-   wasm module loads lazily and decoding happens off the main thread's
-   synchronous call stack), so this now returns a Promise<result|null>.
-   app.js's scan loop has been updated to await it — see app.js.
+   NOTE: decodeFromVideoFrame returns a Promise<result | null>, not a bare
+   value — zxing-wasm decodes are inherently async (the wasm module loads
+   lazily and decoding happens off the main thread's synchronous call
+   stack). app.js's scan loop awaits it — see app.js.
 
    Both still only ever produce the phase-2 shape:
      { rawText: string, format: string, timestamp: number }
@@ -107,12 +104,10 @@
    *   "no-code-found"     — a valid image, but no decodable code in it
    *   "decoder-not-ready" — the wasm module hasn't loaded (or failed to)
    *
-   * Note: unlike the old Image-element-based path, zxing-wasm decodes the
-   * file's bytes directly, so it no longer distinguishes "corrupted image
-   * file" (the old "bad-image" case) from "no code found" — both surface
-   * as "no-code-found" now. Worth knowing if you see that message on a
-   * file that turns out to be genuinely corrupted rather than just
-   * code-less.
+   * Note: a corrupted image file and a valid-but-code-less image can't be
+   * told apart — both surface as "no-code-found". Worth knowing if you see
+   * that message on a file that turns out to be genuinely corrupted rather
+   * than just code-less.
    */
   function decodeFromImage(file) {
     if (!file) return Promise.reject(new Error('not-an-image'));

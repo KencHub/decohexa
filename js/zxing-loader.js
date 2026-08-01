@@ -2,17 +2,17 @@
    zxing-loader.js
    Owns: loading the zxing-wasm "full" module (reader + writer in one
    bundle — js/vendor/zxing-wasm-full.js + js/vendor/zxing_full.wasm).
+   generator.js needs the writer half to support Aztec/PDF417/DataMatrix/
+   etc. generation, not just QR.
 
    WHY THIS FILE EXISTS: decoder.js and generator.js both need the same
-   ZXingWASM module ready before they can do anything. Previously decoder.js
-   fetched and instantiated the wasm itself. Now that generator.js also
-   needs it (to support Aztec/PDF417/DataMatrix/etc. generation, not just
-   QR), letting each file independently fetch+prepare its own module would
-   double the ~1.5MB download and compile the wasm twice — wasteful, and
-   the module-caching in zxing-wasm keys off object identity of the
-   `overrides` object, so two independently-created `{ wasmBinary: ... }`
-   objects with identical bytes would NOT be treated as the same call.
-   Centralizing here guarantees exactly one fetch/prepare no matter how
+   ZXingWASM module ready before they can do anything. Letting each file
+   independently fetch+prepare its own module would double the ~1.5MB
+   download and compile the wasm twice — wasteful, and the module-caching
+   in zxing-wasm keys off object identity of the `overrides` object, so
+   two independently-created `{ wasmBinary: ... }` objects with identical
+   bytes would NOT be treated as the same call. Centralizing here
+   guarantees exactly one fetch/prepare no matter how
    many callers ask for it.
 
    Public surface:
