@@ -703,6 +703,18 @@ button { font-family: inherit; }
 .rule-item__label { font-size: 12.5px; color: var(--ink); }
 .rule-item__pattern { display: block; font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
 
+/* ---- regex test sandbox (#16) — live match feedback before a rule is saved ---- */
+.regex-sandbox { margin-bottom: 8px; }
+.regex-sandbox .field { margin-bottom: 0; }
+.regex-sandbox__result {
+  font-size: 12px; margin: 6px 2px 0; min-height: 15px;
+  word-break: break-word;
+}
+.regex-sandbox__result.is-idle { color: var(--ink-faint); }
+.regex-sandbox__result.is-match { color: var(--success); font-weight: 600; }
+.regex-sandbox__result.is-nomatch { color: var(--ink-faint); font-weight: 600; }
+.regex-sandbox__result.is-invalid { color: var(--danger); font-weight: 600; }
+
 .icon-btn {
   width: 34px; height: 34px; border-radius: var(--radius-sm);
   background: transparent; border: none; color: var(--ink-soft);

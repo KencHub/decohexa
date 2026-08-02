@@ -373,6 +373,10 @@
       </p>
       <input class="field" id="settings-rule-name" placeholder="Label (e.g. Internal SKU)">
       <input class="field mono" id="settings-rule-regex" placeholder="Regex, e.g. ^SKU-\d{6}$">
+      <div class="regex-sandbox">
+        <input class="field mono" id="settings-rule-test" placeholder="Test string — try it live">
+        <p class="regex-sandbox__result" id="settings-rule-test-result" aria-live="polite"></p>
+      </div>
       <button class="btn btn--sm btn--ghost" id="btn-add-rule">Add rule</button>
       <ul class="rule-list" id="settings-rule-list"></ul>
     </section>

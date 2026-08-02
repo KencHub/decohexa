@@ -41,6 +41,8 @@
 
     ruleName: document.getElementById('settings-rule-name'),
     ruleRegex: document.getElementById('settings-rule-regex'),
+    ruleTest: document.getElementById('settings-rule-test'),
+    ruleTestResult: document.getElementById('settings-rule-test-result'),
     btnAddRule: document.getElementById('btn-add-rule'),
     ruleList: document.getElementById('settings-rule-list'),
 
@@ -250,6 +252,51 @@
     });
   }
 
+  // ---- #16: regex test sandbox ------------------------------------------
+  // Purely a live preview against els.ruleRegex/els.ruleTest — reads state,
+  // never writes App.state.settings.rules. Independent of addRule()'s own
+  // try/catch (which still runs on submit) so an invalid pattern is caught
+  // and explained inline as the user types, not just on click.
+  function updateRegexSandbox() {
+    if (!els.ruleTestResult) return;
+    var pattern = (els.ruleRegex && els.ruleRegex.value || '').trim();
+    var testStr = els.ruleTest ? (els.ruleTest.value || '') : '';
+    var el = els.ruleTestResult;
+
+    el.className = 'regex-sandbox__result';
+
+    if (!pattern) {
+      el.textContent = '';
+      return;
+    }
+
+    var re;
+    try {
+      re = new RegExp(pattern);
+    } catch (err) {
+      el.textContent = 'Invalid pattern: ' + err.message;
+      el.classList.add('is-invalid');
+      return;
+    }
+
+    if (!testStr) {
+      el.textContent = 'Valid pattern \u2014 type a test string above to try it live.';
+      el.classList.add('is-idle');
+      return;
+    }
+
+    if (re.test(testStr)) {
+      el.textContent = '\u2713 Matches';
+      el.classList.add('is-match');
+    } else {
+      el.textContent = '\u2715 No match';
+      el.classList.add('is-nomatch');
+    }
+  }
+
+  if (els.ruleRegex) els.ruleRegex.addEventListener('input', updateRegexSandbox);
+  if (els.ruleTest) els.ruleTest.addEventListener('input', updateRegexSandbox);
+
   function addRule() {
     var label = (els.ruleName.value || '').trim();
     var pattern = (els.ruleRegex.value || '').trim();
@@ -270,6 +317,8 @@
     });
     els.ruleName.value = '';
     els.ruleRegex.value = '';
+    if (els.ruleTest) els.ruleTest.value = '';
+    updateRegexSandbox();
     persistRules();
     renderRuleList();
     App.ui.toast('Rule added.');
@@ -353,6 +402,7 @@
   // ---- init --------------------------------------------------------------------
   loadRules();
   renderRuleList();
+  updateRegexSandbox();
 
   try {
     var savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
