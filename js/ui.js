@@ -10,7 +10,9 @@
      window.ScannerApp.ui.toast(message, kind?)  // kind: 'default' | 'danger'
      window.ScannerApp.ui.confirm(message)       -> Promise<boolean>
      window.ScannerApp.ui.describeResultFields    // attached later by app.js;
-                                                    // parsed -> [{label,value,link}]
+                                                    // parsed -> [{label,value,link,sensitive}]
+     window.ScannerApp.ui.renderSensitiveField(dd, value)     // mask/reveal control for a <dd>
+     window.ScannerApp.ui.maskWifiRawText(rawText, parsed)    // masks P:<password> in a raw WIFI: payload
    ========================================================================== */
 
 (function () {
@@ -182,6 +184,89 @@
 
   // Time-only stamp for individual History rows, now that the day context
   // lives in the sticky group header above them instead of on every row.
+  // Masks the P:<password> segment of a raw WiFi QR payload string
+  // ("WIFI:T:WPA;S:MySSID;P:MyPassword;;"), for callers that display the
+  // raw scanned text by default rather than behind an explicit reveal —
+  // History's collapsed-row preview and Scan's always-visible readout
+  // (both would otherwise show the password on-screen with zero
+  // interaction). No-op for non-WiFi entries. Respects the vCard/WIFI
+  // escaping convention (\; \, \: \\) documented in parsers.js, so an
+  // escaped ';' inside the password doesn't truncate the match early.
+  // Shared so the two callers can't drift out of sync with each other.
+  //
+  // Deliberately keyed off parsed.type === 'wifi' only, NOT
+  // parsed.data.password — a malformed payload that uses ':' instead of
+  // ';' as its field separator (e.g. "WIFI:S:MyNet:T:WPA:P:pass123::")
+  // fails tryParseWifi()'s field-splitting in parsers.js, so
+  // parsed.data.password comes back empty even though the raw string
+  // still visibly contains "P:pass123". Running the regex directly
+  // against rawText (rather than trusting the structured parse) still
+  // catches that case; it's a no-op if there's no "P:" substring to find,
+  // so a genuinely password-less WiFi entry is unaffected either way.
+  function maskWifiRawText(rawText, parsed) {
+    if (!parsed || parsed.type !== 'wifi' || !parsed.data) {
+      return rawText;
+    }
+    var MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+    if (parsed.data.password) {
+      // A real P: field was structurally isolated by the parser (proper
+      // ';'-separated fields). Mask only that field — require it to be
+      // preceded by ';' or to be the very first field after 'WIFI:' — so
+      // a coincidental "P:" substring elsewhere (e.g. an SSID like
+      // "ShopP:5") is never mistaken for the password and left exposed.
+      return rawText.replace(/(^WIFI:|;)(P:)((?:\\.|[^;])*)/i, function (match, lead, key, pwd) {
+        return pwd ? lead + key + MASK : match;
+      });
+    }
+    // No structural P: field was found — the malformed-colon-separator
+    // case this function was originally written for. Fall back to a
+    // loose scan so a password-looking fragment isn't left exposed just
+    // because parsing couldn't cleanly isolate it.
+    return rawText.replace(/P:((?:\\.|[^;])*)/i, function (match, pwd) {
+      return pwd ? 'P:' + MASK : match;
+    });
+  }
+  App.ui.maskWifiRawText = maskWifiRawText;
+
+  // Renders a mask/reveal control into the given <dd> for a sensitive field
+  // value (e.g. a WiFi password), so it isn't shown in plaintext on-screen
+  // or exposed in a casual screenshot by default. Shared by the live Scan
+  // result panel (app.js addField) and History's expanded detail
+  // (history.js buildDetail) so the two stay behavior-identical instead of
+  // drifting. Deliberately NOT used by describeFields()'s text/CSV export
+  // consumers (fieldsToText, exportCsv) — an exported file is opened
+  // intentionally by the user (often to reuse the credential), so masking
+  // it there would just make the export useless.
+  function renderSensitiveField(dd, value) {
+    dd.classList.add('field-value-sensitive');
+    var MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; // fixed-length bullets — doesn't leak password length either
+    var masked = document.createElement('span');
+    masked.className = 'field-value-masked';
+    masked.textContent = MASK;
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'field-reveal-btn';
+    btn.textContent = 'Show';
+    btn.setAttribute('aria-label', 'Show password');
+    btn.setAttribute('aria-pressed', 'false');
+
+    var revealed = false;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      revealed = !revealed;
+      masked.textContent = revealed ? value : MASK;
+      masked.classList.toggle('field-value-masked--revealed', revealed);
+      btn.textContent = revealed ? 'Hide' : 'Show';
+      btn.setAttribute('aria-label', revealed ? 'Hide password' : 'Show password');
+      btn.setAttribute('aria-pressed', String(revealed));
+    });
+
+    dd.appendChild(masked);
+    dd.appendChild(btn);
+  }
+  App.ui.renderSensitiveField = renderSensitiveField;
+
   function formatHistoryTime(ts) {
     return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   }

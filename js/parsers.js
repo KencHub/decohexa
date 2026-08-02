@@ -116,7 +116,14 @@
       out[match[1].toUpperCase()] = unescapeField(match[2]);
     });
 
-    if (!out.S && !out.T) return null; // doesn't actually look like a WiFi payload
+    // Reject only when genuinely no key:value field could be parsed at all
+    // (e.g. "WIFI:this is just a note" with no colon-delimited fields) —
+    // NOT specifically requiring S or T. Requiring S/T let a payload with
+    // only a P: field (e.g. "WIFI:P:onlyfield", no S:, no T:) fall through
+    // to tryParseUrl instead, where it's classified as type 'url' and
+    // completely bypasses every wifi-specific masking safeguard below,
+    // printing the password in plain text as the "Link"/"Path" fields.
+    if (Object.keys(out).length === 0) return null;
 
     return {
       type: 'wifi',

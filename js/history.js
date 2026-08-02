@@ -289,7 +289,7 @@
         '<span class="history-format">' + escapeHtml(entry.format) + '</span>' +
         badges +
       '</div>' +
-      '<div class="history-preview">' + escapeHtml(entry.rawText) + '</div>';
+      '<div class="history-preview">' + escapeHtml(App.ui.maskWifiRawText(entry.rawText, entry.parsed)) + '</div>';
 
     // Tap a row to expand/collapse its full detail *inline, within History*.
     // History stays a self-contained browsable log; Scan's capture panel
@@ -329,7 +329,9 @@
         var dt = document.createElement('dt');
         dt.textContent = f.label;
         var dd = document.createElement('dd');
-        if (f.link) {
+        if (f.sensitive) {
+          App.ui.renderSensitiveField(dd, f.value);
+        } else if (f.link) {
           var a = document.createElement('a');
           a.href = f.value;
           a.target = '_blank';

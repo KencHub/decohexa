@@ -88,7 +88,7 @@
   function renderResult(result) {
     els.resultEmpty.hidden = true;
     els.resultBody.hidden = false;
-    els.resultReadout.textContent = result.rawText;
+    els.resultReadout.textContent = App.ui.maskWifiRawText(result.rawText, result.parsed);
     els.resultRawText.textContent = result.rawText;
 
     els.badgeFormat.hidden = false;
@@ -106,7 +106,9 @@
     var dt = document.createElement('dt');
     dt.textContent = label;
     var dd = document.createElement('dd');
-    if (opts && opts.link) {
+    if (opts && opts.sensitive) {
+      App.ui.renderSensitiveField(dd, value);
+    } else if (opts && opts.link) {
       var a = document.createElement('a');
       a.href = value;
       a.target = '_blank';
@@ -130,7 +132,7 @@
     var d = parsed.data;
 
     function push(label, value, opts) {
-      fields.push({ label: label, value: value, link: !!(opts && opts.link) });
+      fields.push({ label: label, value: value, link: !!(opts && opts.link), sensitive: !!(opts && opts.sensitive) });
     }
 
     switch (parsed.type) {
@@ -158,8 +160,17 @@
         if (d.address) push('Address', d.address);
         break;
       case 'wifi':
-        push('SSID', d.ssid);
-        push('Password', d.password || '(none)');
+        // A malformed WIFI: payload that uses ':' instead of ';' as its
+        // field separator (see tryParseWifi in parsers.js) makes the
+        // greedy "S:(.*)" capture swallow every later field, including
+        // "P:<password>", straight into d.ssid. maskWifiRawText() already
+        // guards the raw-text preview against this exact shape; this
+        // mirrors the same escaping-aware "P:" detection here so the
+        // structured SSID row gets the same protection instead of
+        // printing the embedded password in plain text.
+        var embeddedPassword = !d.password && /P:((?:\\.|[^;])*)/i.exec(d.ssid);
+        push('SSID', d.ssid, { sensitive: !!(embeddedPassword && embeddedPassword[1]) });
+        push('Password', d.password || '(none)', { sensitive: !!d.password });
         push('Encryption', d.encryption);
         push('Hidden', d.hidden ? 'Yes' : 'No');
         break;
@@ -184,7 +195,7 @@
   function renderParsedFields(parsed) {
     els.resultFields.innerHTML = '';
     describeFields(parsed).forEach(function (f) {
-      addField(f.label, f.value, { link: f.link });
+      addField(f.label, f.value, { link: f.link, sensitive: f.sensitive });
     });
   }
 
