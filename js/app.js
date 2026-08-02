@@ -43,6 +43,7 @@
     btnCopyDetails: document.getElementById('btn-copy-details'),
 
     recentScansWrap: document.getElementById('recent-scans'),
+    recentScansListWrap: document.getElementById('recent-scans-list-wrap'),
     recentScansList: document.getElementById('recent-scans-list')
   };
 
@@ -218,13 +219,46 @@
   // delete/undo/clear made from the History page itself should also update
   // this strip the next time the Scan page is looked at (per the split's
   // acceptance criteria).
+  // Toggles has-overflow-left/-right on the wrap based on the list's real
+  // scroll position, so styles.css's edge-fade cue only ever shows in a
+  // direction there's actually more to scroll to (see the CSS comment for
+  // why this exists — a hard-clipped list with no partial next-chip
+  // visible gave no hint it was scrollable during live testing).
+  // 1px tolerance on the "at end" check since some browsers report
+  // scrollWidth/clientWidth/scrollLeft with sub-pixel rounding that would
+  // otherwise leave the right fade very faintly "stuck on" at rest.
+  function updateScrollFadeState() {
+    if (!els.recentScansListWrap || !els.recentScansList) return;
+    var list = els.recentScansList;
+    var atStart = list.scrollLeft <= 0;
+    var atEnd = list.scrollLeft + list.clientWidth >= list.scrollWidth - 1;
+    els.recentScansListWrap.classList.toggle('has-overflow-left', !atStart);
+    els.recentScansListWrap.classList.toggle('has-overflow-right', !atEnd);
+  }
+
+  if (els.recentScansList) {
+    els.recentScansList.addEventListener('scroll', updateScrollFadeState, { passive: true });
+  }
+  window.addEventListener('resize', updateScrollFadeState);
+  // Catches rotation/viewport changes and the strip's own content changing
+  // width (new/removed chips) even when nothing else fires a window
+  // resize — same rationale as history.js's ResizeObserver on its list.
+  if (window.ResizeObserver && els.recentScansList) {
+    new ResizeObserver(updateScrollFadeState).observe(els.recentScansList);
+  }
+
   function renderRecentScans() {
     if (!els.recentScansWrap || !els.recentScansList || !App.history || !App.history.getRecent) return;
 
     var recent = App.history.getRecent(RECENT_SCANS_COUNT);
     els.recentScansWrap.hidden = recent.length === 0;
     els.recentScansList.innerHTML = '';
-    if (!recent.length) return;
+    if (!recent.length) {
+      if (els.recentScansListWrap) {
+        els.recentScansListWrap.classList.remove('has-overflow-left', 'has-overflow-right');
+      }
+      return;
+    }
 
     recent.forEach(function (entry) {
       var li = document.createElement('li');
@@ -263,6 +297,12 @@
 
       els.recentScansList.appendChild(li);
     });
+
+    // innerHTML = '' above already reset scrollLeft to 0, so this always
+    // starts from "at the start" — matters if e.g. the strip previously
+    // had its right-fade showing (mid-scroll) when a new scan came in and
+    // rebuilt the whole list.
+    updateScrollFadeState();
   }
 
   window.addEventListener('scannerapp:historychange', renderRecentScans);

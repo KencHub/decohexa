@@ -462,9 +462,37 @@ button { font-family: inherit; }
   margin: 0; font-size: 12px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint);
 }
+
+/* Edge-fade scroll affordance — without this, a list that clips cleanly at
+   the card edge (rather than leaving a chip visibly cut off mid-way) gives
+   no visual hint that there's more to swipe to; confirmed as a real
+   discoverability gap during live testing on a phone where only 2 of 5+
+   chips fit on screen with a hard, unhinting edge. Two thin gradient
+   overlays sit on top of the list's left/right edges and fade in/out via
+   JS-toggled classes (app.js's updateScrollFadeState(), driven by the
+   list's scroll/resize events) based on whether there's actually more
+   content in that direction — so the cue disappears once you've scrolled
+   all the way to either end instead of hinting at scrolling that isn't
+   possible. */
+.recent-scans__list-wrap { position: relative; }
+.recent-scans__list-wrap::before,
+.recent-scans__list-wrap::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 28px;
+  pointer-events: none; z-index: 1; opacity: 0; transition: opacity .15s ease;
+}
+.recent-scans__list-wrap::before { left: 0; background: linear-gradient(to right, var(--surface), transparent); }
+.recent-scans__list-wrap::after { right: 0; background: linear-gradient(to left, var(--surface), transparent); }
+.recent-scans__list-wrap.has-overflow-left::before { opacity: 1; }
+.recent-scans__list-wrap.has-overflow-right::after { opacity: 1; }
+
 .recent-scans__list {
   display: flex; gap: 10px; margin: 0; padding: 0 2px 2px; list-style: none;
   overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  /* proximity (not mandatory): snaps when a swipe ends near a chip
+     boundary, but still allows resting mid-scroll if the person stops
+     partway — mandatory snapping on a short list like this can feel like
+     the list is fighting a deliberate slow drag. */
+  scroll-snap-type: x proximity;
 }
 .recent-scans__item {
   flex: 0 0 auto; min-width: 132px; max-width: 200px;
@@ -472,6 +500,7 @@ button { font-family: inherit; }
   background: var(--surface-sunken); border: 1px solid var(--border);
   border-radius: var(--radius-md); padding: 9px 12px;
   cursor: pointer; transition: background .12s ease, border-color .12s ease;
+  scroll-snap-align: start;
 }
 .recent-scans__item:hover,
 .recent-scans__item:focus-visible {

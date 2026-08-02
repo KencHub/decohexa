@@ -213,7 +213,15 @@
         <div class="recent-scans__header">
           <h2>Last few scans</h2>
         </div>
-        <ul class="recent-scans__list" id="recent-scans-list"></ul>
+        <!-- Wrapper exists purely so the edge-fade cues below (added after
+             initial testing surfaced that a hard-clipped list with no
+             partial next-chip visible gave no hint it was scrollable) can
+             be positioned over the list without disturbing the card's own
+             padding. app.js toggles has-overflow-left/-right on this
+             element based on the list's actual scrollLeft/scrollWidth. -->
+        <div class="recent-scans__list-wrap" id="recent-scans-list-wrap">
+          <ul class="recent-scans__list" id="recent-scans-list"></ul>
+        </div>
       </div>
     </section>
 
