@@ -176,16 +176,30 @@
       var value = els.selectRetention.value;
       App.state.settings.retention = parseRetentionValue(value);
       persistRetention(value);
+
       // Forced, so a newly-tightened rule (e.g. switching from "Keep
       // everything" to "Keep last 500") visibly trims right away instead of
       // waiting for the next scan or the days-mode throttle window.
-      if (App.history && typeof App.history.applyRetention === 'function') {
-        var removed = App.history.applyRetention(true);
-        if (removed > 0) {
-          App.ui.toast(removed === 1
-            ? 'Removed 1 old entry to match the new retention setting.'
-            : 'Removed ' + removed + ' old entries to match the new retention setting.');
-        }
+      var removed = (App.history && typeof App.history.applyRetention === 'function')
+        ? App.history.applyRetention(true)
+        : 0;
+
+      if (removed > 0) {
+        App.ui.toast(removed === 1
+          ? 'Removed 1 old entry to match the new retention setting.'
+          : 'Removed ' + removed + ' old entries to match the new retention setting.');
+      } else {
+        // Every other case — loosening the cap, picking a setting that
+        // doesn't need to trim anything right now, or (rare) App.history
+        // not being available yet — previously gave zero feedback here.
+        // The setting itself always saves correctly regardless
+        // (persistRetention() above already ran), but with no visible
+        // confirmation a real, successful change looked identical to
+        // nothing having happened. Always confirm the save, reading the
+        // option's own visible text so the toast matches exactly what
+        // the dropdown now shows.
+        var opt = els.selectRetention.options[els.selectRetention.selectedIndex];
+        App.ui.toast('History retention set to: ' + (opt ? opt.textContent : value));
       }
     });
   }

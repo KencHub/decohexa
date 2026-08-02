@@ -17,6 +17,24 @@
        entries removed. settings.js calls this with force=true right after the
        user changes the setting, so the new rule is visibly applied immediately
        instead of waiting for the next scan.
+
+   List virtualization (Split 2b, #3):
+   The History list only builds real DOM nodes for rows near the viewport;
+   everything else is represented purely as height in two spacer <li>s
+   (topSpacer/bottomSpacer) so the page's scrollable height stays correct.
+   Kept self-contained in this file (rather than a separate virtualList.js)
+   because the per-row height logic is intrinsically tied to this list's two
+   row kinds (date header vs. entry, and an entry's height depends on
+   selectMode/expandedEntry) — factoring that out would mean exposing
+   buildItem/buildDateHeader/expandedEntry/selectMode as public surface to a
+   second file for no real gain. See the "list virtualization" section below
+   for the mechanics.
+
+   This app has no inner scrolling container for the list (.history-list
+   sits in normal document flow; the sticky date headers rely on the
+   *window* being the scroll container — see styles.css's comment above
+   .history-list). Virtualization here is therefore driven by window
+   scroll/resize, not a container's scrollTop.
    ========================================================================== */
 
 (function () {
@@ -107,6 +125,35 @@
   // would silently reappear on the next reload via loadPersisted().
   var entryDbKeys = new WeakMap();
 
+  // ---- pending-persistence tracking + unload guard ---------------------------
+  // persistAdd()/persistDelete() are fire-and-forget from their callers'
+  // point of view — fine for normal one-at-a-time usage, but a large burst
+  // (thousands of scans, or clearing/trimming a large history) can queue
+  // far more IndexedDB work than can commit before a person naturally
+  // refreshes or closes the tab. Anything still in flight at that moment is
+  // silently abandoned by the browser, deletes included — confirmed via a
+  // standalone reproduction against this exact file: right after a 3000-add
+  // burst with a 500-entry retention cap, the on-screen count was already
+  // trimmed to 500, but the underlying IndexedDB store still held nearly
+  // all 3000 rows — the "trimmed" rows' delete requests just hadn't
+  // committed yet, and would have been lost by a refresh at that point.
+  // This tracks how many persistAdd/persistDelete operations are still
+  // outstanding and warns before unload if any are, so leaving mid-backlog
+  // becomes a deliberate choice instead of invisible data loss.
+  var pendingPersistCount = 0;
+  function trackPending(promise) {
+    pendingPersistCount++;
+    var done = function () { pendingPersistCount--; };
+    promise.then(done, done);
+    return promise;
+  }
+  window.addEventListener('beforeunload', function (e) {
+    if (pendingPersistCount > 0) {
+      e.preventDefault();
+      e.returnValue = ''; // required by some browsers to actually show the prompt
+    }
+  });
+
   function openDb() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise(function (resolve) {
@@ -134,23 +181,47 @@
       });
     });
     entryDbKeys.set(result, keyPromise);
+    trackPending(keyPromise);
   }
 
   // entries: array of in-memory entry objects to remove from IndexedDB.
   // Each one's key is looked up via entryDbKeys — entries with no known
   // key (never persisted) are skipped rather than guessed at.
+  //
+  // Batches every delete into a SINGLE IndexedDB transaction instead of one
+  // transaction per entry (the original approach). For a bulk delete of
+  // hundreds/thousands of rows (Clear, Delete selected, retention
+  // trimming), that cuts the number of separate transactions the browser
+  // has to serialize and commit from N down to 1 — this is what actually
+  // lets a big delete finish fast enough to reliably beat a person
+  // refreshing, instead of trickling out one commit at a time behind
+  // whatever else is still queued (see the tracking comment above
+  // entryDbKeys for how that showed up as a real bug).
+  //
+  // Returns a Promise that resolves once the transaction has actually
+  // committed (or failed/aborted, best-effort either way — same tolerance
+  // as before), tracked via trackPending() so the unload guard above knows
+  // to warn if a refresh would abandon it mid-flight.
   function persistDelete(entries) {
-    openDb().then(function (db) {
+    var work = openDb().then(function (db) {
       if (!db) return;
-      entries.forEach(function (entry) {
+      return Promise.all(entries.map(function (entry) {
         var keyPromise = entryDbKeys.get(entry);
-        if (!keyPromise) return;
-        keyPromise.then(function (key) {
-          if (key == null) return;
-          db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).delete(key);
+        return keyPromise || Promise.resolve(null);
+      })).then(function (keys) {
+        var validKeys = keys.filter(function (k) { return k != null; });
+        if (!validKeys.length) return;
+        return new Promise(function (resolve) {
+          var tx = db.transaction(STORE_NAME, 'readwrite');
+          var store = tx.objectStore(STORE_NAME);
+          validKeys.forEach(function (key) { store.delete(key); });
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = function () { resolve(); };
+          tx.onabort = function () { resolve(); };
         });
       });
     });
+    return trackPending(work);
   }
 
   function loadPersisted() {
@@ -204,13 +275,44 @@
     Array.prototype.push.apply(App.state.history, kept);
     entries.forEach(dupKeyDecr);
     persistDelete(entries);
-    render();
+    // scheduleRender(), not render() directly: applyRetention() (this
+    // function's only caller) runs its count-mode check on every add(),
+    // so once history is at/over a saved retention cap, a burst of adds
+    // (Batch mode, or the earlier stress-test) would trim and therefore
+    // render() on every single add() — reopening the exact freeze the
+    // add()/scheduleRender() fix above was meant to close, just via a
+    // different path. Deferring by up to one frame here is imperceptible
+    // for the single-call cases too (settings-change, startup enforcement)
+    // since their toast text is built from this function's synchronous
+    // return value, not from the DOM having already re-rendered.
+    scheduleRender();
     return entries.length;
   }
 
   // force=true bypasses the days-mode throttle — used right after load and
   // right after the user changes the retention setting, so a stricter rule
   // takes effect immediately instead of waiting up to a minute.
+  // How much slack to allow past the cap in count-mode before actually
+  // trimming. trimEntries() rebuilds the array (filter + Set), which costs
+  // O(current length) per call. Enforcing the cap exactly on every single
+  // add() once at/over it meant every add() from that point on paid that
+  // O(length) cost again — for a sustained burst of M scans past the cap,
+  // that's O(M × cap) total work, not O(M). Confirmed: a 3000-add burst
+  // with a 500-entry cap already reached did ~1.5 million filter
+  // iterations across 3000 separate array rebuilds (plus a matching
+  // persistDelete()/IndexedDB transaction per trim) — enough to visibly
+  // freeze a real tab, exactly the kind of per-add cost the add()
+  // render-coalescing fix above was meant to eliminate, just reintroduced
+  // via a different path.
+  // Fix: let the array grow up to this many entries past the cap before
+  // trimming, then trim back down to the cap exactly in one pass —
+  // amortizes the O(cap) cost over many adds instead of paying it on
+  // every one. force=true (user changes the setting, or the once-per-load
+  // startup enforcement) bypasses the slack and trims immediately, same
+  // as the existing days-mode force bypass, so a user-initiated
+  // tightening still takes visible effect right away.
+  var COUNT_RETENTION_SLACK = 50;
+
   function applyRetention(force) {
     var retention = App.state.settings.retention;
     if (!retention || retention.mode === 'none' || !retention.value) return 0;
@@ -218,6 +320,7 @@
     if (retention.mode === 'count') {
       var excess = App.state.history.length - retention.value;
       if (excess <= 0) return 0;
+      if (!force && excess < COUNT_RETENTION_SLACK) return 0;
       // Array is oldest-first internally (see getFiltered()'s reverse()),
       // so the oldest entries to drop are always at the front.
       return trimEntries(App.state.history.slice(0, excess));
@@ -236,15 +339,6 @@
   }
 
   // ---- public API -----------------------------------------------------------
-  function matchesCurrentFilter(entry) {
-    var query = (els.search.value || '').trim().toLowerCase();
-    var format = els.filterFormat.value;
-    if (format && entry.format !== format) return false;
-    if (!query) return true;
-    return entry.rawText.toLowerCase().indexOf(query) !== -1 ||
-           entry.format.toLowerCase().indexOf(query) !== -1;
-  }
-
   function updateCounts(filtered) {
     var full = App.state.history;
     var filteredCount = (filtered || getFiltered()).length;
@@ -262,39 +356,24 @@
     dupKeyIncr(result);
     trackFormat(result.format);
 
-    // Fast path: a full render() rebuilds every row in the list, which
-    // gets slower as history grows — a real problem for Batch mode, whose
-    // whole purpose is logging many scans in one session. When the new
-    // entry would land at the top of the currently-filtered view anyway,
-    // just insert that one row instead of rebuilding everything.
-    if (matchesCurrentFilter(result)) {
-      var emptyRow = document.getElementById('history-empty');
-      if (emptyRow) emptyRow.remove();
-
-      // A brand-new entry is always the most recent, so it always belongs
-      // at the very top. If the current top-of-list header already covers
-      // today, just insert the row under it; otherwise (empty list, or the
-      // last scan was on a previous day — e.g. crossing midnight) insert a
-      // fresh header too, so the header-per-group invariant render() relies
-      // on never drifts out of sync on this fast path.
-      var todayKey = App.ui.getDateGroupKey(result.timestamp);
-      var topNode = els.list.firstChild;
-      var topIsTodayHeader = topNode && topNode.classList &&
-        topNode.classList.contains('history-date-header') &&
-        Number(topNode.dataset.groupKey) === todayKey;
-
-      if (topIsTodayHeader) {
-        els.list.insertBefore(buildItem(result), topNode.nextSibling);
-      } else {
-        els.list.insertBefore(buildDateHeader(App.ui.getDateGroupLabel(result.timestamp), todayKey), topNode);
-        els.list.insertBefore(buildItem(result), topNode);
-      }
-      var filtered = getFiltered();
-      updateCounts(filtered);
-      syncSelectFooter(filtered);
-    } else {
-      render();
-    }
+    // Split 1 (#2) added a fast path here that inserted one DOM row
+    // directly instead of calling a full render(), because render() used
+    // to rebuild every row in the list — a real problem for Batch mode.
+    // Split 2b's virtualization made that unnecessary in terms of DOM
+    // size, since render() only ever builds DOM for the small on-screen
+    // window regardless of history size. BUT render() also forces a
+    // synchronous layout every time (measureRenderedRows reads
+    // offsetHeight), and add() calling it directly, once per add(),
+    // meant a tight burst of adds — Batch mode, or a stress-test loop —
+    // still forced that layout once per scan with zero yielding back to
+    // the browser in between. Confirmed on-device: 3000 synchronous
+    // add() calls in a row froze a mobile browser tab.
+    // Fix: scheduleRender() coalesces any number of add() calls within
+    // the same animation frame into a single render() call. For real
+    // usage (one scan at a time, human-paced) this is imperceptible —
+    // still renders within ~16ms. For a burst, it collapses N calls into
+    // one render() no matter how large N is.
+    scheduleRender();
 
     persistAdd(result);
     applyRetention();
@@ -498,44 +577,338 @@
     return div.innerHTML;
   }
 
+  // Coalesces bursts of render() requests into one per animation frame.
+  // Used by add() (see its comment for why: a tight burst of adds — Batch
+  // mode, or a stress-test loop — was calling render() once per add() with
+  // no yielding in between, and render() forces a synchronous layout, which
+  // froze the page). Other callers (search, filter, delete, clear, undo,
+  // select mode, expand/collapse) still call render() directly, since a
+  // single user action rendering immediately is exactly what should happen
+  // — only add()'s burst case needed coalescing.
+  var pendingRenderFrame = null;
+  function scheduleRender() {
+    if (pendingRenderFrame) return;
+    pendingRenderFrame = window.requestAnimationFrame(function () {
+      pendingRenderFrame = null;
+      render();
+    });
+  }
+
   function render() {
+    // A direct render() call makes any still-pending scheduled one (from
+    // scheduleRender()) redundant — cancel it so a burst of adds followed
+    // immediately by e.g. a search keystroke doesn't render twice in a row.
+    if (pendingRenderFrame) {
+      window.cancelAnimationFrame(pendingRenderFrame);
+      pendingRenderFrame = null;
+    }
+
     var full = App.state.history;
     var filtered = getFiltered();
 
     updateCounts(filtered);
     syncSelectFooter(filtered);
 
-    els.list.innerHTML = '';
-
     if (!full.length) {
+      currentFlatItems = [];
+      teardownWindow();
       appendEmptyRow('Nothing scanned yet.');
       return;
     }
     if (!filtered.length) {
+      currentFlatItems = [];
+      teardownWindow();
       appendEmptyRow('No history entries match your search.');
       return;
     }
 
-    // getFiltered() already returns newest-first; walk it once, inserting
-    // a sticky date header whenever the day changes instead of repeating
-    // the date on every row (each row now shows only a time — see
-    // buildItem()).
+    // getFiltered() already returns newest-first; walk it once, building a
+    // flat list of rows (date headers + entries) instead of DOM nodes —
+    // renderVisibleWindow() below turns the on-screen slice of *this* into
+    // real elements. Every row still gets exactly one header per group,
+    // same invariant as before, just expressed as data instead of DOM.
+    var flat = [];
     var lastGroupKey = null;
     for (var i = 0; i < filtered.length; i++) {
       var entry = filtered[i];
       var groupKey = App.ui.getDateGroupKey(entry.timestamp);
       if (groupKey !== lastGroupKey) {
-        els.list.appendChild(buildDateHeader(App.ui.getDateGroupLabel(entry.timestamp), groupKey));
+        flat.push({ type: 'header', groupKey: groupKey, label: App.ui.getDateGroupLabel(entry.timestamp) });
         lastGroupKey = groupKey;
       }
-      els.list.appendChild(buildItem(entry));
+      flat.push({ type: 'item', entry: entry });
+    }
+    currentFlatItems = flat;
+    renderVisibleWindow(true);
+  }
+
+  // ---- list virtualization (Split 2b, #3) -------------------------------------
+  // Only rows within OVERSCAN_PX of the viewport get real DOM nodes; the
+  // rest of the list's height is represented by two spacer <li>s so the
+  // page's scrollable height (and the sticky date-header math, which relies
+  // on normal document flow) stays correct without every row existing in
+  // the DOM at once.
+  //
+  // Height of a given row isn't known in advance (badges can wrap onto a
+  // second line, and an expanded entry's detail panel is a different
+  // height per entry) — heights are measured after each real render and
+  // cached, keyed by the entry object itself (stable across re-renders,
+  // since App.state.history holds the same objects). An entry can need two
+  // different cached heights (collapsed vs. its own expanded height), so
+  // the cache stores both and picks the right one based on current state.
+  // Rows not yet measured fall back to a fixed estimate; the estimate only
+  // has to be close enough for smooth scrolling, since it self-corrects to
+  // the real height the first time that row is actually rendered.
+  //
+  // Sticky-header fix: .history-date-header uses position:sticky, which
+  // only pins while the element actually exists in the DOM. The windowing
+  // above only keeps rows within OVERSCAN_PX of the viewport — so once you
+  // scroll more than ~600px past a date header, its row used to get culled
+  // entirely and the sticky header simply vanished (nothing left to pin).
+  // Fix: renderVisibleWindow() always finds the nearest header at or
+  // before the visible window's start row and, if that header isn't
+  // already part of the window, renders one extra copy of it right above
+  // the window (with its own gap spacer, midSpacer, covering the culled
+  // rows in between) so position:sticky always has a live anchor.
+  var currentFlatItems = [];       // rebuilt by render(): [{type:'header',...}|{type:'item',...}]
+  var itemHeightCache = new Map(); // entry -> { collapsed?: px, expanded?: px }
+  var headerHeightCache = new Map(); // groupKey -> px
+  var DEFAULT_ITEM_HEIGHT = 74;
+  var DEFAULT_EXPANDED_HEIGHT = 320;
+  var DEFAULT_HEADER_HEIGHT = 34;
+  var OVERSCAN_PX = 600; // render this many extra px of rows above/below the viewport
+  var renderedRange = { start: -1, end: -1, pinnedIdx: -1 };
+  var topSpacer = null;
+  var midSpacer = null;   // gap between a pinned header and the visible window, when they're not adjacent
+  var bottomSpacer = null;
+  var pinnedHeaderEl = null; // the currently-anchored sticky header, when rendered separately from the window
+  var pendingFrame = null;
+  // render() calls made while the History view is hidden (e.g. a scan
+  // added from the Scan page) still update currentFlatItems, but the DOM
+  // window is left untouched (no point laying out a hidden list) and
+  // renderedRange is left stale. This flag forces one full rebuild the
+  // next time the view becomes visible, so a stale-but-numerically-equal
+  // range can never be mistaken for "nothing to do" and skipped.
+  var wasHidden = false;
+
+  function heightOfRow(row) {
+    if (row.type === 'header') {
+      return headerHeightCache.get(row.groupKey) || DEFAULT_HEADER_HEIGHT;
+    }
+    var isExpanded = !selectMode && row.entry === expandedEntry;
+    var rec = itemHeightCache.get(row.entry);
+    if (rec) {
+      if (isExpanded && rec.expanded) return rec.expanded;
+      if (!isExpanded && rec.collapsed) return rec.collapsed;
+    }
+    return isExpanded ? DEFAULT_EXPANDED_HEIGHT : DEFAULT_ITEM_HEIGHT;
+  }
+
+  // offsets[i] = cumulative height of currentFlatItems[0..i-1]; offsets[n]
+  // is the total (virtual) list height. O(n) over the *filtered* row count,
+  // same order as getFiltered()'s own filter+reverse pass — negligible
+  // next to that, and only walks a plain cached-height array, not the DOM.
+  function buildOffsets() {
+    var n = currentFlatItems.length;
+    var offsets = new Array(n + 1);
+    offsets[0] = 0;
+    for (var i = 0; i < n; i++) {
+      offsets[i + 1] = offsets[i] + heightOfRow(currentFlatItems[i]);
+    }
+    return offsets;
+  }
+
+  // Returns the largest row index i such that offsets[i] <= target (i.e.
+  // the row that "covers" that cumulative-height position), clamped to a
+  // valid row index.
+  function findRowAtOffset(offsets, target) {
+    var lo = 0, hi = offsets.length - 2;
+    if (hi < 0) return 0;
+    while (lo < hi) {
+      var mid = (lo + hi + 1) >> 1;
+      if (offsets[mid] <= target) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  function ensureSpacers() {
+    if (!topSpacer) {
+      topSpacer = document.createElement('li');
+      topSpacer.className = 'history-vlist-spacer';
+      topSpacer.setAttribute('aria-hidden', 'true');
+    }
+    if (!midSpacer) {
+      midSpacer = document.createElement('li');
+      midSpacer.className = 'history-vlist-spacer';
+      midSpacer.setAttribute('aria-hidden', 'true');
+    }
+    if (!bottomSpacer) {
+      bottomSpacer = document.createElement('li');
+      bottomSpacer.className = 'history-vlist-spacer';
+      bottomSpacer.setAttribute('aria-hidden', 'true');
     }
   }
 
+  function teardownWindow() {
+    renderedRange = { start: -1, end: -1, pinnedIdx: -1 };
+    pinnedHeaderEl = null;
+  }
+
+  // Reads the *current* (pre-update) position of the list in the viewport
+  // to decide which rows should be visible. Deliberately computed before
+  // any DOM changes this pass makes — see the long comment on add() above
+  // for why that self-corrects positions correctly even when new rows are
+  // inserted above the current window.
+  function computeVisibleRange() {
+    var n = currentFlatItems.length;
+    if (!n) return null;
+    var rect = els.list.getBoundingClientRect();
+    var viewportTop = Math.max(0, -rect.top - OVERSCAN_PX);
+    var viewportBottom = -rect.top + window.innerHeight + OVERSCAN_PX;
+
+    var offsets = buildOffsets();
+    var total = offsets[n];
+    if (viewportBottom > total) viewportBottom = total;
+
+    var start = findRowAtOffset(offsets, viewportTop);
+    var end = findRowAtOffset(offsets, Math.max(viewportTop, viewportBottom));
+    start = Math.max(0, Math.min(start, n - 1));
+    end = Math.max(start, Math.min(end, n - 1));
+    return { start: start, end: end, offsets: offsets, total: total };
+  }
+
+  // pinnedIdx/needsPinnedCopy describe whether a header is being rendered
+  // separately, above the window, as a sticky anchor (see the fix comment
+  // above heightOfRow). When it is, topSpacer only needs to cover rows
+  // *before* that header, and midSpacer covers the gap between the header
+  // and the window's first rendered row.
+  function updateSpacerHeights(layout, pinnedIdx, needsPinnedCopy) {
+    ensureSpacers();
+    if (needsPinnedCopy) {
+      topSpacer.style.height = layout.offsets[pinnedIdx] + 'px';
+      midSpacer.style.height = Math.max(0, layout.offsets[layout.start] - layout.offsets[pinnedIdx + 1]) + 'px';
+    } else {
+      topSpacer.style.height = layout.offsets[layout.start] + 'px';
+    }
+    bottomSpacer.style.height = Math.max(0, layout.total - layout.offsets[layout.end + 1]) + 'px';
+  }
+
+  // Reads the actual laid-out height of each just-rendered row and updates
+  // the height cache. Run right after inserting the window into the real
+  // DOM, so an expanded entry's detail panel (already part of the node
+  // buildItem() returns — see its is-expanded branch) is measured in its
+  // final state with no extra layout pass needed.
+  function measureRenderedRows(start, end, startNode) {
+    var node = startNode;
+    for (var i = start; i <= end && node && node !== bottomSpacer; i++, node = node.nextSibling) {
+      var row = currentFlatItems[i];
+      var h = node.offsetHeight;
+      if (!h) continue;
+      if (row.type === 'header') {
+        headerHeightCache.set(row.groupKey, h);
+      } else {
+        var isExpanded = !selectMode && row.entry === expandedEntry;
+        var rec = itemHeightCache.get(row.entry) || {};
+        if (isExpanded) rec.expanded = h; else rec.collapsed = h;
+        itemHeightCache.set(row.entry, rec);
+      }
+    }
+  }
+
+  // Measures the separately-rendered pinned header copy (see fix comment
+  // above heightOfRow). Kept distinct from measureRenderedRows since it's
+  // a single element outside the [start,end] loop, not part of that range.
+  function measurePinnedHeader(pinnedIdx) {
+    if (!pinnedHeaderEl) return;
+    var h = pinnedHeaderEl.offsetHeight;
+    if (!h) return;
+    headerHeightCache.set(currentFlatItems[pinnedIdx].groupKey, h);
+  }
+
+  // force=true (render()'s callers: search/filter change, add, delete,
+  // expand/collapse, select mode) always rebuilds the on-screen DOM, since
+  // the *content* for the same index range may have changed even when the
+  // index range itself hasn't (e.g. expanding a row that's already
+  // visible). force=false (the scroll/resize scheduler below) only
+  // rebuilds when the visible index range actually changed, since nothing
+  // else could have.
+  function renderVisibleWindow(force) {
+    if (els.list.offsetParent === null) { wasHidden = true; return; } // not visible right now
+    if (wasHidden) { force = true; wasHidden = false; }
+    if (!currentFlatItems.length) return;
+
+    var layout = computeVisibleRange();
+    if (!layout) return;
+
+    // Nearest header at or before the window's first row — this is the
+    // one that *should* currently be pinned at the top of the viewport.
+    // If it's not already inside [start,end] it would otherwise have been
+    // culled entirely, taking the sticky pin with it (see fix comment
+    // above heightOfRow) — so render one extra copy of it above the
+    // window instead.
+    var pinnedIdx = -1;
+    for (var p = layout.start; p >= 0; p--) {
+      if (currentFlatItems[p].type === 'header') { pinnedIdx = p; break; }
+    }
+    var needsPinnedCopy = pinnedIdx !== -1 && pinnedIdx < layout.start;
+
+    var sameRange = layout.start === renderedRange.start && layout.end === renderedRange.end;
+    var samePinned = pinnedIdx === renderedRange.pinnedIdx;
+    if (!force && sameRange && samePinned) {
+      updateSpacerHeights(layout, pinnedIdx, needsPinnedCopy);
+      return;
+    }
+    renderedRange = { start: layout.start, end: layout.end, pinnedIdx: pinnedIdx };
+
+    ensureSpacers();
+    var frag = document.createDocumentFragment();
+    for (var i = layout.start; i <= layout.end; i++) {
+      var row = currentFlatItems[i];
+      frag.appendChild(row.type === 'header'
+        ? buildDateHeader(row.label, row.groupKey)
+        : buildItem(row.entry));
+    }
+
+    els.list.innerHTML = '';
+    els.list.appendChild(topSpacer);
+    if (needsPinnedCopy) {
+      var headerRow = currentFlatItems[pinnedIdx];
+      pinnedHeaderEl = buildDateHeader(headerRow.label, headerRow.groupKey);
+      els.list.appendChild(pinnedHeaderEl);
+      els.list.appendChild(midSpacer);
+    } else {
+      pinnedHeaderEl = null;
+    }
+    els.list.appendChild(frag);
+    els.list.appendChild(bottomSpacer);
+    updateSpacerHeights(layout, pinnedIdx, needsPinnedCopy);
+
+    measureRenderedRows(layout.start, layout.end, needsPinnedCopy ? midSpacer.nextSibling : topSpacer.nextSibling);
+    if (needsPinnedCopy) measurePinnedHeader(pinnedIdx);
+  }
+
+  function scheduleWindowUpdate() {
+    if (pendingFrame) return;
+    pendingFrame = window.requestAnimationFrame(function () {
+      pendingFrame = null;
+      renderVisibleWindow(false);
+    });
+  }
+
+  window.addEventListener('scroll', scheduleWindowUpdate, { passive: true });
+  window.addEventListener('resize', scheduleWindowUpdate);
+  // Catches the History view going from hidden (display:none, 0 height) to
+  // visible when the user switches tabs — that's a resize of els.list from
+  // history.js's point of view even though nothing in this file triggered
+  // it (ui.js owns the tab switch), so it needs its own observer rather
+  // than relying on the window 'resize' listener above.
+  if (window.ResizeObserver) {
+    new ResizeObserver(scheduleWindowUpdate).observe(els.list);
+  }
+
   // Sticky separator between days' worth of rows. groupKey is stashed on
-  // the node itself (rather than recomputed from label text) so add()'s
-  // fast path can cheaply check "is the top group already today?" without
-  // re-parsing a display string.
+  // the node itself so heightOfRow()/measureRenderedRows() can cache its
+  // height without re-parsing a display string.
   function buildDateHeader(label, groupKey) {
     var li = document.createElement('li');
     li.className = 'history-date-header';
@@ -546,6 +919,7 @@
   }
 
   function appendEmptyRow(text) {
+    els.list.innerHTML = '';
     var empty = document.createElement('li');
     empty.className = 'history-empty';
     empty.id = 'history-empty';

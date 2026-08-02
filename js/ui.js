@@ -130,8 +130,15 @@
   var confirmCancel = document.getElementById('confirm-modal-cancel');
   var pendingResolve = null;
 
-  function openConfirm(message) {
+  // danger defaults to true so existing call sites (Clear history, Delete
+  // selected) keep rendering a red Confirm button with no change — pass
+  // danger=false for a non-destructive confirmation, which renders the OK
+  // button as .btn--primary instead.
+  function openConfirm(message, danger) {
+    if (danger === undefined) danger = true;
     confirmMessage.textContent = message;
+    confirmOk.classList.remove('btn--danger', 'btn--primary');
+    confirmOk.classList.add(danger ? 'btn--danger' : 'btn--primary');
     confirmScrim.classList.add('is-open');
     confirmModal.classList.add('is-open');
     confirmOk.focus();
