@@ -444,6 +444,48 @@ button { font-family: inherit; }
 .uploader.is-dragover { border-color: var(--brand); background: var(--brand-soft); }
 .uploader__link { color: var(--brand); font-weight: 600; text-decoration: underline; }
 
+/* ---- recent-scans strip (Split 4b, #18) ----
+   A horizontally-scrolling row of small "chips" rather than a vertical
+   list — sits below the scan/capture grid at any width (see the 980px/
+   720px breakpoints below, where .scan-layout itself stacks to one
+   column) without needing its own responsive column logic; a horizontal
+   swipe works the same on mobile, tablet, and desktop trackpads/mice. */
+.recent-scans {
+  margin-top: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px 16px;
+}
+.recent-scans__header { margin-bottom: 10px; }
+.recent-scans__header h2 {
+  margin: 0; font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint);
+}
+.recent-scans__list {
+  display: flex; gap: 10px; margin: 0; padding: 0 2px 2px; list-style: none;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+}
+.recent-scans__item {
+  flex: 0 0 auto; min-width: 132px; max-width: 200px;
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 9px 12px;
+  cursor: pointer; transition: background .12s ease, border-color .12s ease;
+}
+.recent-scans__item:hover,
+.recent-scans__item:focus-visible {
+  background: var(--brand-soft); border-color: var(--brand); outline: none;
+}
+.recent-scans__format {
+  font-size: 10.5px; font-weight: 700; color: var(--brand);
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.recent-scans__preview {
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* ---- capture panel (result) ---- */
 .capture-panel {
   background: var(--surface);
@@ -780,4 +822,5 @@ button { font-family: inherit; }
   .chip-btn svg { width: 13px; height: 13px; }
   .history-controls { flex-wrap: wrap; }
   .field--search { width: 100%; }
+  .recent-scans__item { min-width: 112px; padding: 8px 10px; }
 }

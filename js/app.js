@@ -40,8 +40,13 @@
     badgeValid: document.getElementById('result-badge-valid'),
     badgeInvalid: document.getElementById('result-badge-invalid'),
     badgeDupe: document.getElementById('result-badge-dupe'),
-    btnCopyDetails: document.getElementById('btn-copy-details')
+    btnCopyDetails: document.getElementById('btn-copy-details'),
+
+    recentScansWrap: document.getElementById('recent-scans'),
+    recentScansList: document.getElementById('recent-scans-list')
   };
+
+  var RECENT_SCANS_COUNT = 5;
 
   var ICON_PLAY = '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
   var ICON_STOP = '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
@@ -204,6 +209,69 @@
   // this switch-case.
   App.ui = App.ui || {};
   App.ui.describeResultFields = describeFields;
+
+  // ---- recent-scans strip (Split 4b, #18) -------------------------------------
+  // Small "last few scans" strip on the Scan page, so recent history is
+  // glanceable without navigating away. Sourced from App.history.getRecent()
+  // and re-rendered on the 'scannerapp:historychange' event history.js fires
+  // after every change to App.state.history — not just new scans, since a
+  // delete/undo/clear made from the History page itself should also update
+  // this strip the next time the Scan page is looked at (per the split's
+  // acceptance criteria).
+  function renderRecentScans() {
+    if (!els.recentScansWrap || !els.recentScansList || !App.history || !App.history.getRecent) return;
+
+    var recent = App.history.getRecent(RECENT_SCANS_COUNT);
+    els.recentScansWrap.hidden = recent.length === 0;
+    els.recentScansList.innerHTML = '';
+    if (!recent.length) return;
+
+    recent.forEach(function (entry) {
+      var li = document.createElement('li');
+      li.className = 'recent-scans__item';
+      li.setAttribute('role', 'button');
+      li.setAttribute('tabindex', '0');
+      li.setAttribute('aria-label', entry.format + ': ' + entry.rawText);
+
+      var format = document.createElement('span');
+      format.className = 'recent-scans__format';
+      format.textContent = entry.format;
+
+      var preview = document.createElement('span');
+      preview.className = 'recent-scans__preview';
+      preview.textContent = App.ui.maskWifiRawText(entry.rawText, entry.parsed);
+
+      li.appendChild(format);
+      li.appendChild(preview);
+
+      // Navigate to History with this exact entry expanded and scrolled
+      // into view, rather than just switching tabs and leaving the person
+      // to relocate it — see App.history.focusEntry()'s own comment for
+      // why setView() must happen first (it measures/scrolls the real,
+      // now-visible list).
+      function openInHistory() {
+        App.ui.setView('history');
+        if (App.history.focusEntry) App.history.focusEntry(entry);
+      }
+      li.addEventListener('click', openInHistory);
+      li.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          openInHistory();
+        }
+      });
+
+      els.recentScansList.appendChild(li);
+    });
+  }
+
+  window.addEventListener('scannerapp:historychange', renderRecentScans);
+  // Initial paint. If history.js hasn't finished rehydrating from
+  // IndexedDB yet at this point (it loads asynchronously — see its own
+  // file), this just renders an empty/hidden strip; the historychange
+  // event history.js fires once rehydration completes re-triggers this
+  // and picks up the previous session's entries.
+  renderRecentScans();
 
   // Pure: curated per-type data for .json export — the JSON counterpart of
   // describeFields() above. Unlike describeFields (which returns

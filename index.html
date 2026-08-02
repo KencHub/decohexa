@@ -201,6 +201,20 @@
           </div>
         </aside>
       </div>
+
+      <!-- "Last few scans" strip (#18) — populated/updated by app.js,
+           which listens for the 'scannerapp:historychange' event history.js
+           dispatches on every history change (not just new scans, since a
+           delete/undo/clear elsewhere should also update this strip the
+           next time it's looked at). Hidden via the `hidden` attribute
+           whenever history is empty, toggled in JS rather than CSS so an
+           empty strip never reserves layout space. -->
+      <div class="recent-scans" id="recent-scans" hidden>
+        <div class="recent-scans__header">
+          <h2>Last few scans</h2>
+        </div>
+        <ul class="recent-scans__list" id="recent-scans-list"></ul>
+      </div>
     </section>
 
     <!-- ============ GENERATE VIEW ============ -->

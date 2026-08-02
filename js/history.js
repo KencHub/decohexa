@@ -17,6 +17,26 @@
        entries removed. settings.js calls this with force=true right after the
        user changes the setting, so the new rule is visibly applied immediately
        instead of waiting for the next scan.
+     window.ScannerApp.history.getRecent(n)  // added: Split 4b (#18)
+       Returns up to n entries from App.state.history, newest first. Read-only
+       helper for the Scan-page "last few scans" strip (app.js) — doesn't touch
+       selection/expansion state or the DOM.
+     window.ScannerApp.history.focusEntry(entry)  // added: Split 4b (#18)
+       Expands `entry` in the History list and scrolls it into view, clearing
+       the active search/format filter first if either is currently hiding it.
+       Caller must switch to the History view (App.ui.setView('history')) BEFORE
+       calling this — it measures/scrolls the real list, which only has a
+       meaningful (non-zero) layout once its view is visible.
+
+   Event (added: Split 4b, #18):
+     window 'scannerapp:historychange' — dispatched (no detail payload; listen
+     and re-read App.state.history / call getRecent() as needed) after every
+     change to App.state.history: add, clear (+ its undo/expire), bulk/single
+     delete (+ its undo/expire), retention trimming, and IndexedDB rehydration
+     on load. Exists so other views (currently just the Scan-page recent-scans
+     strip in app.js) can stay in sync with History without polling or being
+     the ones to call render() themselves — this file remains the only writer
+     of App.state.history, everyone else just listens.
 
    List virtualization (Split 2b, #3):
    The History list only builds real DOM nodes for rows near the viewport;
@@ -65,6 +85,18 @@
   var knownFormats = [];
   var activeEntry = null;
   var expandedEntry = null;
+
+  // ---- historychange event (Split 4b, #18) ------------------------------------
+  // Dispatched after every mutation of App.state.history. See the file-level
+  // comment above for the full contract. A plain window CustomEvent (no
+  // detail payload) rather than a callback registry, since this file has no
+  // reason to track its listeners — window events are the same pattern
+  // App.ui already uses for resize/orientationchange, so this doesn't
+  // introduce a new convention.
+  var HISTORY_CHANGE_EVENT = 'scannerapp:historychange';
+  function fireHistoryChange() {
+    window.dispatchEvent(new CustomEvent(HISTORY_CHANGE_EVENT));
+  }
 
   // ---- duplicate-count map (backs validators.isDuplicate's O(1) path) -------
   // Map<dupKey, count> instead of a Set, because history intentionally keeps
@@ -275,6 +307,7 @@
     Array.prototype.push.apply(App.state.history, kept);
     entries.forEach(dupKeyDecr);
     persistDelete(entries);
+    fireHistoryChange();
     // scheduleRender(), not render() directly: applyRetention() (this
     // function's only caller) runs its count-mode check on every add(),
     // so once history is at/over a saved retention cap, a burst of adds
@@ -338,6 +371,83 @@
     return 0;
   }
 
+  // ---- recent-scans strip support (Split 4b, #18) ----------------------------
+  // getRecent() is a plain read — no interaction with selectMode/expandedEntry
+  // or the DOM, safe to call at any time (including before the first render()
+  // or while History is hidden).
+  function getRecent(n) {
+    var full = App.state.history;
+    var out = [];
+    for (var i = full.length - 1; i >= 0 && out.length < n; i--) {
+      out.push(full[i]);
+    }
+    return out;
+  }
+
+  function isEntryUnderCurrentFilters(entry) {
+    return getFiltered().indexOf(entry) !== -1;
+  }
+
+  // Mirrors the --sticky-nav-offset custom property ui.js publishes (see
+  // its syncStickyNavOffset()) — used below so a scrolled-to row doesn't
+  // land underneath the sticky top nav bar on phones.
+  function getStickyNavOffsetPx() {
+    var raw = getComputedStyle(document.documentElement).getPropertyValue('--sticky-nav-offset');
+    var n = parseFloat(raw);
+    return isNaN(n) ? 0 : n;
+  }
+
+  // Scrolls the *window* (this list's actual scroll container — see the
+  // file-level comment on why) so the row at currentFlatItems[idx] lands
+  // just under the sticky nav / sticky date header, using the same
+  // cumulative-offset math the virtualization window itself uses. Letting
+  // the resulting native scroll event drive renderVisibleWindow() (via the
+  // existing scroll listener) rather than forcing a window into existence
+  // here directly — that keeps this function from having to duplicate the
+  // overscan/pinned-header logic renderVisibleWindow() already owns.
+  function scrollListToFlatIndex(idx) {
+    if (idx < 0 || idx >= currentFlatItems.length) return;
+    var offsets = buildOffsets();
+    var rect = els.list.getBoundingClientRect();
+    var listDocTop = window.scrollY + rect.top;
+    var target = listDocTop + offsets[idx] - (getStickyNavOffsetPx() + 12);
+    window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }
+
+  // Jumps straight to `entry` in the History list: expanded, and scrolled
+  // into view. See the file-level comment for the "caller must setView
+  // first" contract — this measures the real list's layout, which only
+  // means anything once the History view is actually visible.
+  function focusEntry(entry) {
+    if (!entry || App.state.history.indexOf(entry) === -1) return;
+
+    // Select mode has no detail panel to expand into (see toggleSelectMode)
+    // — exit it first rather than silently doing nothing.
+    if (selectMode) {
+      selectMode = false;
+      selectedEntries.clear();
+    }
+
+    // Only touch search/filter if they're actually hiding the entry —
+    // clearing them unconditionally would be a surprising side effect for
+    // an entry the person could already see.
+    if (!isEntryUnderCurrentFilters(entry)) {
+      els.search.value = '';
+      els.filterFormat.value = '';
+    }
+
+    expandedEntry = entry;
+    activeEntry = entry;
+    render();
+
+    var idx = -1;
+    for (var i = 0; i < currentFlatItems.length; i++) {
+      var row = currentFlatItems[i];
+      if (row.type === 'item' && row.entry === entry) { idx = i; break; }
+    }
+    scrollListToFlatIndex(idx);
+  }
+
   // ---- public API -----------------------------------------------------------
   function updateCounts(filtered) {
     var full = App.state.history;
@@ -377,6 +487,7 @@
 
     persistAdd(result);
     applyRetention();
+    fireHistoryChange();
   }
 
   var CLEAR_UNDO_MS = 5000;
@@ -399,6 +510,7 @@
       // them individually, since nothing else is in history at this point.
       App.state.history._dupKeyCounts.clear();
       render();
+      fireHistoryChange();
 
       App.ui.toast('History cleared.', null, {
         actionLabel: 'Undo',
@@ -419,6 +531,7 @@
           // again here would double-count them.
           snapshot.forEach(dupKeyIncr);
           render();
+          fireHistoryChange();
         },
         onExpire: function () {
           // Undo window passed untouched — now actually delete. Uses the
@@ -518,6 +631,7 @@
     Array.prototype.push.apply(App.state.history, kept);
     entries.forEach(dupKeyDecr);
     render();
+    fireHistoryChange();
 
     App.ui.toast(opts.message || 'Deleted.', null, {
       actionLabel: 'Undo',
@@ -539,6 +653,7 @@
         Array.prototype.push.apply(App.state.history, addedDuringWindow);
         entries.forEach(dupKeyIncr);
         render();
+        fireHistoryChange();
       },
       onExpire: function () {
         // Same reasoning as Clear's undo: only these specific entries' rows
@@ -1424,7 +1539,9 @@
   App.history = {
     add: add,
     clear: clear,
-    applyRetention: applyRetention
+    applyRetention: applyRetention,
+    getRecent: getRecent,
+    focusEntry: focusEntry
   };
 
   render();
@@ -1446,7 +1563,13 @@
     // right after history.js, well before this IndexedDB promise resolves),
     // so this correctly enforces whatever rule was saved in a prior session
     // — e.g. the cap was lowered since the last visit and IndexedDB still
-    // has more entries than the new limit allows.
+    // has more entries than the new limit allows. applyRetention() fires
+    // its own historychange event if it actually trims anything; fired
+    // unconditionally here too, since even a no-op retention check still
+    // means rehydration itself changed App.state.history from empty to
+    // populated — app.js's recent-scans strip (#18) needs to hear about
+    // that regardless of whether retention did anything.
     applyRetention(true);
+    fireHistoryChange();
   });
 })();
