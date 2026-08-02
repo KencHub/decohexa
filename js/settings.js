@@ -46,7 +46,10 @@
     btnAddRule: document.getElementById('btn-add-rule'),
     ruleList: document.getElementById('settings-rule-list'),
 
-    selectRetention: document.getElementById('settings-retention-mode')
+    selectRetention: document.getElementById('settings-retention-mode'),
+
+    storageCount: document.getElementById('settings-storage-count'),
+    storageSize: document.getElementById('settings-storage-size')
   };
 
   var RULES_STORAGE_KEY = 'scannerapp_custom_rules';
@@ -60,6 +63,7 @@
   function openPanel() {
     els.drawer.classList.add('is-open');
     els.scrim.classList.add('is-open');
+    updateStorageIndicator();
   }
   function closePanel() {
     els.drawer.classList.remove('is-open');
@@ -205,6 +209,58 @@
       }
     });
   }
+
+  // ---- #17: storage usage indicator ------------------------------------------
+  // Read-only — no writes to localStorage/IndexedDB. Entry count comes
+  // straight from App.state.history.length (kept in sync with IndexedDB by
+  // history.js itself, including after rehydration on load), so that number
+  // is exact, not an estimate. Byte usage is a genuine estimate (the
+  // StorageManager API reports the whole origin's storage, not just this
+  // app's IndexedDB store, and browsers are explicitly allowed to round/fuzz
+  // it for fingerprinting resistance) — labeled as such rather than implying
+  // precision it doesn't have.
+  function formatBytes(bytes) {
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return null;
+    if (bytes < 1024) return bytes + ' B';
+    var units = ['KB', 'MB', 'GB', 'TB'];
+    var value = bytes;
+    var unitIndex = -1;
+    do {
+      value /= 1024;
+      unitIndex++;
+    } while (value >= 1024 && unitIndex < units.length - 1);
+    return value.toFixed(value < 10 ? 1 : 0) + ' ' + units[unitIndex];
+  }
+
+  function updateStorageIndicator() {
+    if (els.storageCount) {
+      var count = (App.state.history && App.state.history.length) || 0;
+      els.storageCount.textContent = count === 1 ? '1 entry' : (count + ' entries');
+    }
+
+    if (!els.storageSize) return;
+
+    if (!navigator.storage || typeof navigator.storage.estimate !== 'function') {
+      els.storageSize.textContent = 'Storage size estimate not supported in this browser.';
+      return;
+    }
+
+    navigator.storage.estimate().then(function (est) {
+      if (!els.storageSize) return; // panel/DOM could theoretically be gone by now
+      var used = formatBytes(est && est.usage);
+      els.storageSize.textContent = used
+        ? ('~' + used + ' used on this device (estimate)')
+        : 'Storage usage estimate unavailable.';
+    }).catch(function () {
+      if (els.storageSize) els.storageSize.textContent = 'Storage usage estimate unavailable.';
+    });
+  }
+
+  // Keep the indicator live while the panel is open too (not just on next
+  // open) — cheap to recompute and matches how every other history-derived
+  // UI (recent-scans strip, History page itself) already stays in sync via
+  // this same event rather than polling.
+  window.addEventListener('scannerapp:historychange', updateStorageIndicator);
 
   // ---- custom regex prefix rules ---------------------------------------------
   function persistRules() {
@@ -403,6 +459,7 @@
   loadRules();
   renderRuleList();
   updateRegexSandbox();
+  updateStorageIndicator();
 
   try {
     var savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
