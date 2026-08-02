@@ -481,30 +481,95 @@
     return getFiltered().filter(function (e) { return selectedEntries.has(e); });
   }
 
+  var DELETE_UNDO_MS = 5000; // same window as Clear's CLEAR_UNDO_MS, kept as
+  // its own constant rather than reusing that one — this path (partial
+  // deletes: bulk-select and single-row swipe) shouldn't be coupled to
+  // Clear's own tuning going forward even though they start equal today.
+
+  // Shared delete/undo path for #10 (bulk delete, deleteSelected() below)
+  // and #11 (single-row swipe delete, see attachSwipeHandlers()). Both
+  // remove a *subset* of App.state.history — unlike clear(), which always
+  // empties everything — so undo has to put each removed entry back in its
+  // original relative position among the entries that stayed, not just
+  // prepend or append them; a partial delete undo that reordered the list
+  // would be a visible correctness bug, not just a cosmetic one.
+  //
+  // Does not show its own confirm() — callers decide whether the action
+  // needs confirming up front. deleteSelected() still confirms, since it's
+  // a bulk action that can remove many rows at once; the single swipe
+  // delete doesn't, since the Undo toast itself already covers the "oops"
+  // case for one row without an extra tap.
+  function removeEntriesWithUndo(entries, opts) {
+    opts = opts || {};
+    if (!entries.length) return;
+
+    // Snapshot the full array (not just `entries`) in its current relative
+    // order — this is what lets undo restore each deleted entry to its
+    // original position relative to the entries that stayed, rather than
+    // just appending them back at the end.
+    var beforeSnapshot = App.state.history.slice();
+    var toDeleteSet = new Set(entries);
+    var kept = beforeSnapshot.filter(function (e) { return !toDeleteSet.has(e); });
+
+    // Mutate App.state.history in place (length=0 then re-push) rather than
+    // reassigning it to a new array — other modules may hold a reference to
+    // this exact array instance (same approach clear() uses).
+    App.state.history.length = 0;
+    Array.prototype.push.apply(App.state.history, kept);
+    entries.forEach(dupKeyDecr);
+    render();
+
+    App.ui.toast(opts.message || 'Deleted.', null, {
+      actionLabel: 'Undo',
+      duration: DELETE_UNDO_MS,
+      onAction: function () {
+        // Anything present in App.state.history now but not in `kept` was
+        // added during the undo window (add() only ever pushes), so it's
+        // strictly newer than everything being restored and belongs after
+        // it either way.
+        var keptSet = new Set(kept);
+        var addedDuringWindow = App.state.history.filter(function (e) { return !keptSet.has(e); });
+
+        App.state.history.length = 0;
+        // beforeSnapshot already holds the deleted entries in their correct
+        // relative position among the survivors — restoring from it (rather
+        // than kept.concat(entries)) is what actually satisfies "original
+        // position, not prepended."
+        Array.prototype.push.apply(App.state.history, beforeSnapshot);
+        Array.prototype.push.apply(App.state.history, addedDuringWindow);
+        entries.forEach(dupKeyIncr);
+        render();
+      },
+      onExpire: function () {
+        // Same reasoning as Clear's undo: only these specific entries' rows
+        // get deleted from IndexedDB, not a blanket wipe, so anything
+        // scanned during the undo window (already persisted via its own
+        // persistAdd() call) is left untouched.
+        persistDelete(entries);
+      }
+    });
+  }
+
   function deleteSelected() {
     var count = selectedEntries.size;
     if (!count) return;
     App.ui.confirm(
-      'Delete ' + count + ' selected ' + (count === 1 ? 'code' : 'codes') +
-      ' from history? This cannot be undone.'
+      'Delete ' + count + ' selected ' + (count === 1 ? 'code' : 'codes') + ' from history?'
     ).then(function (ok) {
       if (!ok) return;
-      var toDelete = selectedEntries;
-      // Mutate App.state.history in place (length=0 then re-push) rather
-      // than reassigning App.state.history to a new array — clear() above
-      // does the same, since other modules may hold a reference to this
-      // exact array instance.
-      var kept = App.state.history.filter(function (e) { return !toDelete.has(e); });
-      App.state.history.length = 0;
-      Array.prototype.push.apply(App.state.history, kept);
-      toDelete.forEach(dupKeyDecr);
-
-      persistDelete(Array.from(toDelete));
+      var toDelete = Array.from(selectedEntries);
       selectedEntries.clear();
       selectMode = false;
-      render();
-      App.ui.toast(count === 1 ? '1 code deleted.' : count + ' codes deleted.');
+      removeEntriesWithUndo(toDelete, {
+        message: count === 1 ? '1 code deleted.' : count + ' codes deleted.'
+      });
     });
+  }
+
+  // Single-row delete triggered by the swipe gesture (#11). No confirm
+  // dialog — see the note above removeEntriesWithUndo() for why.
+  function deleteSingleEntry(entry) {
+    removeEntriesWithUndo([entry], { message: 'Code deleted.' });
   }
 
   function syncSelectFooter(filtered) {
@@ -960,7 +1025,14 @@
         (isSelected ? ' checked' : '') + '>'
       : '';
 
-    item.innerHTML =
+    // Row content lives in its own translatable wrapper rather than
+    // directly in the <li> — the swipe-to-delete gesture (#11, below)
+    // slides *this* element left to reveal a delete action sitting behind
+    // it at the <li> level, without disturbing the <li>'s own layout
+    // height (which drives the virtualization height cache).
+    var content = document.createElement('div');
+    content.className = 'history-item__content';
+    content.innerHTML =
       '<div class="history-row1">' +
         checkboxHtml +
         '<span class="history-time mono">' + time + '</span>' +
@@ -968,6 +1040,33 @@
         badges +
       '</div>' +
       '<div class="history-preview">' + escapeHtml(App.ui.maskWifiRawText(entry.rawText, entry.parsed)) + '</div>';
+    item.appendChild(content);
+
+    // Swipe-to-delete (#11) — mobile only (gated on pointerType==='touch'
+    // inside attachSwipeHandlers), disabled while selectMode is active,
+    // since select mode already gives tap-on-row its own meaning
+    // (toggle selection) and the two gestures shouldn't compete over what
+    // a touch on a row means.
+    if (!selectMode) {
+      var swipeAction = document.createElement('div');
+      swipeAction.className = 'history-item__swipe-action';
+      swipeAction.setAttribute('aria-hidden', 'true');
+      var deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'history-item__delete-btn';
+      deleteBtn.textContent = 'Delete';
+      // Sits behind the (opaque) content wrapper until revealed by a
+      // swipe, so it shouldn't be in the normal tab order until then.
+      deleteBtn.tabIndex = -1;
+      deleteBtn.addEventListener('click', function (e) {
+        e.stopPropagation(); // don't also trigger the row's own click handler below
+        closeSwipe(item, content, false);
+        deleteSingleEntry(entry);
+      });
+      swipeAction.appendChild(deleteBtn);
+      item.appendChild(swipeAction);
+      attachSwipeHandlers(item, content, entry);
+    }
 
     // Tap a row to expand/collapse its full detail *inline, within History*
     // — unless select mode is active, in which case a tap toggles that
@@ -979,16 +1078,133 @@
         toggleEntrySelected(entry);
         return;
       }
+      if (item === swipeOpenItem) {
+        // A tap while this row's delete action is revealed closes the
+        // swipe instead of also expanding the row underneath it — mirrors
+        // the swipe-row behavior of most mobile mail/messaging apps, and
+        // avoids one tap doing two different things at once.
+        closeSwipe(item, content, true);
+        return;
+      }
+      if (item.dataset.suppressClick === '1') {
+        // A real swipe drag (not a tap) just ended on this row — see
+        // attachSwipeHandlers(). Treat the click the browser synthesizes
+        // afterward as part of that gesture, not a fresh tap-to-expand.
+        delete item.dataset.suppressClick;
+        return;
+      }
       expandedEntry = (expandedEntry === entry) ? null : entry;
       activeEntry = entry;
       render();
     });
 
     if (!selectMode && entry === expandedEntry) {
-      item.appendChild(buildDetail(entry));
+      content.appendChild(buildDetail(entry));
     }
 
     return item;
+  }
+
+  // ---- swipe-to-delete (#11) --------------------------------------------------
+  // Touch-only (see the pointerType guard in attachSwipeHandlers): mouse/pen
+  // interaction with a row is untouched, still handled entirely by the
+  // click listener in buildItem() above.
+  var SWIPE_REVEAL_PX = 76;          // matches .history-item__swipe-action width
+  var SWIPE_MAX_DRAG_PX = 96;        // small rubber-band past fully-open
+  var SWIPE_MOVE_THRESHOLD_PX = 10;  // ignore jitter below this as "not a swipe"
+  var SWIPE_OPEN_SNAP_RATIO = 0.4;   // open if dragged past 40% of reveal width
+  var swipeOpenItem = null;          // the one currently-revealed <li>, so
+                                      // opening a new row auto-closes the last one
+
+  function closeSwipe(item, content, animate) {
+    if (!animate) content.style.transition = 'none';
+    content.style.transform = 'translateX(0px)';
+    item.classList.remove('is-swipe-open');
+    if (swipeOpenItem === item) swipeOpenItem = null;
+    if (!animate) {
+      // Force layout so this instant close doesn't get coalesced with a
+      // later, genuinely-animated transform change on the same element.
+      void content.offsetHeight;
+      content.style.transition = '';
+    }
+  }
+
+  function openSwipe(item, content) {
+    if (swipeOpenItem && swipeOpenItem !== item) {
+      var prevContent = swipeOpenItem.querySelector('.history-item__content');
+      if (prevContent) closeSwipe(swipeOpenItem, prevContent, true);
+    }
+    content.style.transform = 'translateX(-' + SWIPE_REVEAL_PX + 'px)';
+    item.classList.add('is-swipe-open');
+    swipeOpenItem = item;
+  }
+
+  // Attaches the swipe gesture to a single row. Uses Pointer Events (not
+  // raw touch events) so the same listeners work whether the browser
+  // routes touch through pointer or touch APIs, but every handler bails
+  // immediately for any pointerType other than 'touch' — mouse/pen users
+  // get exactly the pre-existing click-only behavior, unchanged.
+  function attachSwipeHandlers(item, content, entry) {
+    var startX = 0, startY = 0, startTransform = 0;
+    var dragging = false, decided = false, horizontal = false;
+
+    item.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'touch') return;
+      startX = e.clientX;
+      startY = e.clientY;
+      startTransform = (item === swipeOpenItem) ? -SWIPE_REVEAL_PX : 0;
+      dragging = true;
+      decided = false;
+      horizontal = false;
+      content.style.transition = 'none';
+    });
+
+    item.addEventListener('pointermove', function (e) {
+      if (!dragging || e.pointerType !== 'touch') return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+
+      if (!decided) {
+        if (Math.abs(dx) < SWIPE_MOVE_THRESHOLD_PX && Math.abs(dy) < SWIPE_MOVE_THRESHOLD_PX) return;
+        decided = true;
+        horizontal = Math.abs(dx) > Math.abs(dy);
+        if (!horizontal) {
+          // Predominantly vertical movement: this is a page scroll, not a
+          // swipe. Stop tracking the gesture entirely and let the browser's
+          // native scrolling (touch-action: pan-y in CSS) handle it.
+          dragging = false;
+          return;
+        }
+        item.dataset.suppressClick = '1';
+      }
+      if (!horizontal) return;
+
+      e.preventDefault(); // we're driving the horizontal motion ourselves now
+      var next = startTransform + dx;
+      if (next > 0) next = 0;
+      if (next < -SWIPE_MAX_DRAG_PX) next = -SWIPE_MAX_DRAG_PX;
+      content.style.transform = 'translateX(' + next + 'px)';
+    }, { passive: false });
+
+    function finishDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      if (!decided || !horizontal) return; // was a tap, or handed off to vertical scroll
+
+      var dx = (typeof e.clientX === 'number' ? e.clientX : startX) - startX;
+      var finalX = startTransform + dx;
+      var shouldOpen = finalX < -(SWIPE_REVEAL_PX * SWIPE_OPEN_SNAP_RATIO);
+      content.style.transition = '';
+      if (shouldOpen) openSwipe(item, content); else closeSwipe(item, content, true);
+      // suppressClick is normally consumed by the click listener in
+      // buildItem(); this is a fallback in case no click event follows
+      // (e.g. pointercancel), so the flag can't linger and wrongly
+      // swallow some unrelated future tap on this row.
+      window.setTimeout(function () { delete item.dataset.suppressClick; }, 0);
+    }
+
+    item.addEventListener('pointerup', finishDrag);
+    item.addEventListener('pointercancel', finishDrag);
   }
 
   function buildDetail(entry) {
