@@ -42,7 +42,9 @@
     ruleName: document.getElementById('settings-rule-name'),
     ruleRegex: document.getElementById('settings-rule-regex'),
     btnAddRule: document.getElementById('btn-add-rule'),
-    ruleList: document.getElementById('settings-rule-list')
+    ruleList: document.getElementById('settings-rule-list'),
+
+    selectRetention: document.getElementById('settings-retention-mode')
   };
 
   var RULES_STORAGE_KEY = 'scannerapp_custom_rules';
@@ -50,6 +52,7 @@
   var SOUND_STORAGE_KEY = 'scannerapp_sound';
   var VIBRATION_STORAGE_KEY = 'scannerapp_vibration';
   var BATCH_MODE_STORAGE_KEY = 'scannerapp_batch_mode';
+  var RETENTION_STORAGE_KEY = 'scannerapp_retention';
 
   // ---- panel open/close -----------------------------------------------------
   function openPanel() {
@@ -131,6 +134,59 @@
   if (els.btnBatchModeMain) {
     els.btnBatchModeMain.addEventListener('click', function () {
       window.setTimeout(syncBatchModeUI, 0);
+    });
+  }
+
+  // ---- history retention (#12; trimming itself lives in history.js) ---------
+  // Stored as a single plain string ("none" / "count:500" / "days:30") rather
+  // than JSON, since the <select>'s own option values already are that string
+  // — no serialize/parse mismatch to keep in sync.
+  var RETENTION_DEFAULT = 'none';
+
+  function parseRetentionValue(str) {
+    if (!str || str === 'none') return { mode: 'none', value: null };
+    var parts = str.split(':');
+    var mode = parts[0];
+    var value = parseInt(parts[1], 10);
+    if ((mode !== 'count' && mode !== 'days') || !value || value <= 0) {
+      return { mode: 'none', value: null };
+    }
+    return { mode: mode, value: value };
+  }
+
+  function persistRetention(str) {
+    try { window.localStorage.setItem(RETENTION_STORAGE_KEY, str); } catch (err) { /* storage unavailable */ }
+  }
+
+  function loadRetentionValue() {
+    try {
+      var raw = window.localStorage.getItem(RETENTION_STORAGE_KEY);
+      // Validate against the select's actual <option> values rather than
+      // trusting the stored string outright, in case a future build removes
+      // an option a past session saved.
+      if (raw && els.selectRetention && Array.prototype.some.call(els.selectRetention.options, function (o) { return o.value === raw; })) {
+        return raw;
+      }
+    } catch (err) { /* storage unavailable */ }
+    return RETENTION_DEFAULT;
+  }
+
+  if (els.selectRetention) {
+    els.selectRetention.addEventListener('change', function () {
+      var value = els.selectRetention.value;
+      App.state.settings.retention = parseRetentionValue(value);
+      persistRetention(value);
+      // Forced, so a newly-tightened rule (e.g. switching from "Keep
+      // everything" to "Keep last 500") visibly trims right away instead of
+      // waiting for the next scan or the days-mode throttle window.
+      if (App.history && typeof App.history.applyRetention === 'function') {
+        var removed = App.history.applyRetention(true);
+        if (removed > 0) {
+          App.ui.toast(removed === 1
+            ? 'Removed 1 old entry to match the new retention setting.'
+            : 'Removed ' + removed + ' old entries to match the new retention setting.');
+        }
+      }
     });
   }
 
@@ -303,6 +359,16 @@
     var savedBatchMode = window.localStorage.getItem(BATCH_MODE_STORAGE_KEY);
     if (savedBatchMode === '0' || savedBatchMode === '1') App.state.settings.batchMode = savedBatchMode === '1';
   } catch (err) { /* storage unavailable — keep default */ }
+
+  if (els.selectRetention) {
+    var savedRetention = loadRetentionValue();
+    els.selectRetention.value = savedRetention;
+    App.state.settings.retention = parseRetentionValue(savedRetention);
+    // No applyRetention(true) call here by design — history.js's own
+    // loadPersisted().then() callback calls it once rehydration finishes,
+    // and by then this synchronous init has already set the state above.
+    // Calling it here too would just be a redundant, slightly-earlier trim.
+  }
 
   applyTheme();
   setSwitchVisual(els.switchSound, App.state.settings.sound);

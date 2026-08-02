@@ -10,6 +10,13 @@
    Public surface (per integration contract — do not rename):
      window.ScannerApp.history.add(result)
      window.ScannerApp.history.clear()
+     window.ScannerApp.history.applyRetention(force)  // added: Split 2a (#4/#12)
+       Trims App.state.history (+ IndexedDB) against App.state.settings.retention
+       ({ mode: 'none'|'count'|'days', value: number|null }, owned/persisted by
+       settings.js — see that file's retention section). Returns the number of
+       entries removed. settings.js calls this with force=true right after the
+       user changes the setting, so the new rule is visibly applied immediately
+       instead of waiting for the next scan.
    ========================================================================== */
 
 (function () {
@@ -165,6 +172,69 @@
     });
   }
 
+  // ---- retention / cap (#4, #12) ---------------------------------------------
+  // App.state.settings.retention is owned/persisted by settings.js — this file
+  // only reads it and does the actual trimming, same division of labor as the
+  // rest of the settings <-> history boundary in this app.
+  //
+  // 'count' mode is O(1) to check (just a length compare) and, once at cap,
+  // keeps App.state.history itself bounded at that cap size going forward —
+  // so calling this on every add() never reintroduces the O(n)-per-scan cost
+  // that Split 1 (#1/#2) fixed; the array can't grow past the cap regardless
+  // of how many codes get scanned in a session.
+  //
+  // 'days' mode can't bound the array size the same way (a busy batch session
+  // can log thousands of scans inside a 7/30/90-day window), so checking it
+  // on literally every add would re-introduce that same O(n)-per-scan problem.
+  // It's throttled to at most once/minute instead — acceptable per this
+  // split's own acceptance criteria ("on next add (or on a schedule)"), since
+  // newly-added entries are always newer than the cutoff anyway and only
+  // cross it as real time passes, not as scan volume increases.
+  var lastDaysRetentionCheck = 0;
+  var DAYS_RETENTION_CHECK_MIN_INTERVAL_MS = 60 * 1000;
+
+  // entries: array of in-memory entries to remove. Mirrors deleteSelected()'s
+  // approach (rebuild the array in place, decrement dup counts, persistDelete,
+  // re-render) since trimming is a data-shape delete like any other here.
+  function trimEntries(entries) {
+    if (!entries.length) return 0;
+    var removeSet = new Set(entries);
+    var kept = App.state.history.filter(function (e) { return !removeSet.has(e); });
+    App.state.history.length = 0;
+    Array.prototype.push.apply(App.state.history, kept);
+    entries.forEach(dupKeyDecr);
+    persistDelete(entries);
+    render();
+    return entries.length;
+  }
+
+  // force=true bypasses the days-mode throttle — used right after load and
+  // right after the user changes the retention setting, so a stricter rule
+  // takes effect immediately instead of waiting up to a minute.
+  function applyRetention(force) {
+    var retention = App.state.settings.retention;
+    if (!retention || retention.mode === 'none' || !retention.value) return 0;
+
+    if (retention.mode === 'count') {
+      var excess = App.state.history.length - retention.value;
+      if (excess <= 0) return 0;
+      // Array is oldest-first internally (see getFiltered()'s reverse()),
+      // so the oldest entries to drop are always at the front.
+      return trimEntries(App.state.history.slice(0, excess));
+    }
+
+    if (retention.mode === 'days') {
+      var now = Date.now();
+      if (!force && (now - lastDaysRetentionCheck) < DAYS_RETENTION_CHECK_MIN_INTERVAL_MS) return 0;
+      lastDaysRetentionCheck = now;
+      var cutoff = now - retention.value * 24 * 60 * 60 * 1000;
+      var toRemove = App.state.history.filter(function (e) { return e.timestamp < cutoff; });
+      return trimEntries(toRemove);
+    }
+
+    return 0;
+  }
+
   // ---- public API -----------------------------------------------------------
   function matchesCurrentFilter(entry) {
     var query = (els.search.value || '').trim().toLowerCase();
@@ -227,6 +297,7 @@
     }
 
     persistAdd(result);
+    applyRetention();
   }
 
   var CLEAR_UNDO_MS = 5000;
@@ -762,7 +833,8 @@
 
   App.history = {
     add: add,
-    clear: clear
+    clear: clear,
+    applyRetention: applyRetention
   };
 
   render();
@@ -779,5 +851,12 @@
       trackFormat(entry.format);
     });
     render();
+    // Forced: settings.js has already loaded the saved retention setting
+    // synchronously by the time this async callback fires (its script runs
+    // right after history.js, well before this IndexedDB promise resolves),
+    // so this correctly enforces whatever rule was saved in a prior session
+    // — e.g. the cap was lowered since the last visit and IndexedDB still
+    // has more entries than the new limit allows.
+    applyRetention(true);
   });
 })();
