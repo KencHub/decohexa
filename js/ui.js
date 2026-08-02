@@ -7,7 +7,11 @@
 
    Public surface:
      window.ScannerApp.ui.setView(name)          // 'scan' | 'generate' | 'history'
-     window.ScannerApp.ui.toast(message, kind?)  // kind: 'default' | 'danger'
+     window.ScannerApp.ui.toast(message, kind?, opts?)  // kind: 'default' | 'danger'
+                                                 // opts: { actionLabel, onAction, onExpire, duration }
+                                                 // — onAction fires if the action button is tapped;
+                                                 // onExpire fires instead if the toast times out
+                                                 // untouched. Exactly one of the two ever fires.
      window.ScannerApp.ui.confirm(message)       -> Promise<boolean>
      window.ScannerApp.ui.describeResultFields    // attached later by app.js;
                                                     // parsed -> [{label,value,link,sensitive}]
@@ -66,17 +70,55 @@
   // ---- toast -----------------------------------------------------------------
   var toastStack = document.getElementById('toast-stack');
 
-  function toast(message, kind) {
+  // opts is optional and additive — every pre-existing call site that only
+  // passes (message) or (message, kind) behaves exactly as before. Only
+  // Feature 7 (undo on "Clear history") passes opts so far.
+  function toast(message, kind, opts) {
     if (!toastStack) return;
+    opts = opts || {};
+
     var el = document.createElement('div');
-    el.className = 'toast' + (kind === 'danger' ? ' toast--danger' : '');
-    el.textContent = message;
-    toastStack.appendChild(el);
-    requestAnimationFrame(function () { el.classList.add('is-shown'); });
-    window.setTimeout(function () {
+    el.className = 'toast' +
+      (kind === 'danger' ? ' toast--danger' : '') +
+      (opts.actionLabel ? ' toast--action' : '');
+
+    var textEl = document.createElement('span');
+    textEl.className = 'toast__text';
+    textEl.textContent = message;
+    el.appendChild(textEl);
+
+    // settled guards against both paths firing — either the action button
+    // is clicked, or the timer expires untouched, never both.
+    var settled = false;
+
+    function hide() {
       el.classList.remove('is-shown');
       window.setTimeout(function () { el.remove(); }, 200);
-    }, 3200);
+    }
+
+    if (opts.actionLabel && opts.onAction) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast__action';
+      btn.textContent = opts.actionLabel;
+      btn.addEventListener('click', function () {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(hideTimer);
+        opts.onAction();
+        hide();
+      });
+      el.appendChild(btn);
+    }
+
+    toastStack.appendChild(el);
+    requestAnimationFrame(function () { el.classList.add('is-shown'); });
+    var hideTimer = window.setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      hide();
+      if (opts.onExpire) opts.onExpire();
+    }, opts.duration || 3200);
   }
   App.ui.toast = toast;
 

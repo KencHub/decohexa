@@ -25,12 +25,30 @@
     filterFormat: document.getElementById('history-filter-format'),
     btnExportCsv: document.getElementById('btn-history-export-csv'),
     btnExportJson: document.getElementById('btn-history-export-json'),
-    btnClear: document.getElementById('btn-history-clear')
+    btnClear: document.getElementById('btn-history-clear'),
+    footerDefault: document.getElementById('history-footer'),
+    footerSelect: document.getElementById('history-footer-select'),
+    btnSelectToggle: document.getElementById('btn-history-select-toggle'),
+    btnSelectAll: document.getElementById('btn-history-select-all'),
+    btnSelectCancel: document.getElementById('btn-history-select-cancel'),
+    btnDeleteSelected: document.getElementById('btn-history-delete-selected'),
+    btnExportSelectedCsv: document.getElementById('btn-history-export-selected-csv'),
+    btnExportSelectedJson: document.getElementById('btn-history-export-selected-json'),
+    selectCount: document.getElementById('history-select-count')
   };
 
   var knownFormats = [];
   var activeEntry = null;
   var expandedEntry = null;
+
+  // ---- bulk select mode -------------------------------------------------------
+  // selectMode replaces tap-to-expand with tap-to-select on each row (see
+  // buildItem()); expandedEntry is deliberately left alone (not restored)
+  // when select mode ends — nothing was relying on it while selecting, and
+  // starting select mode fresh with nothing expanded avoids a detail panel
+  // interfering with row taps.
+  var selectMode = false;
+  var selectedEntries = new Set();
 
   // ---- persistence (IndexedDB) -----------------------------------------------
   // App.state.history itself stays an in-memory array (everything above reads
@@ -47,6 +65,16 @@
   var DB_VERSION = 1;
   var STORE_NAME = 'history';
   var dbPromise = null;
+
+  // Maps an in-memory entry object -> a Promise that resolves to its
+  // IndexedDB key (or null if it was never persisted, e.g. IndexedDB was
+  // unavailable at add time). A Promise rather than the bare key because
+  // persistAdd()'s write is async — if a bulk delete targets an entry
+  // that was scanned moments ago, its key might not have come back from
+  // IndexedDB yet; persistDelete() awaits this promise instead of racing
+  // it, so a fast select-and-delete can never leave an orphaned row that
+  // would silently reappear on the next reload via loadPersisted().
+  var entryDbKeys = new WeakMap();
 
   function openDb() {
     if (dbPromise) return dbPromise;
@@ -66,16 +94,31 @@
   }
 
   function persistAdd(result) {
-    openDb().then(function (db) {
-      if (!db) return;
-      db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).add(result);
+    var keyPromise = openDb().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (resolve) {
+        var req = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).add(result);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { resolve(null); };
+      });
     });
+    entryDbKeys.set(result, keyPromise);
   }
 
-  function persistClear() {
+  // entries: array of in-memory entry objects to remove from IndexedDB.
+  // Each one's key is looked up via entryDbKeys — entries with no known
+  // key (never persisted) are skipped rather than guessed at.
+  function persistDelete(entries) {
     openDb().then(function (db) {
       if (!db) return;
-      db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear();
+      entries.forEach(function (entry) {
+        var keyPromise = entryDbKeys.get(entry);
+        if (!keyPromise) return;
+        keyPromise.then(function (key) {
+          if (key == null) return;
+          db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).delete(key);
+        });
+      });
     });
   }
 
@@ -83,8 +126,16 @@
     return openDb().then(function (db) {
       if (!db) return [];
       return new Promise(function (resolve) {
-        var req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
-        req.onsuccess = function () { resolve(req.result || []); };
+        var entries = [];
+        var store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
+        var req = store.openCursor();
+        req.onsuccess = function (e) {
+          var cursor = e.target.result;
+          if (!cursor) { resolve(entries); return; }
+          entryDbKeys.set(cursor.value, Promise.resolve(cursor.key));
+          entries.push(cursor.value);
+          cursor.continue();
+        };
         req.onerror = function () { resolve([]); };
       });
     });
@@ -144,6 +195,7 @@
         els.list.insertBefore(buildItem(result), topNode);
       }
       updateCounts();
+      syncSelectFooter();
     } else {
       render();
     }
@@ -151,17 +203,146 @@
     persistAdd(result);
   }
 
+  var CLEAR_UNDO_MS = 5000;
+
   function clear() {
     if (!App.state.history.length) return;
     App.ui.confirm(
-      'Clear all ' + App.state.history.length + ' scanned codes from history? This cannot be undone.'
+      'Clear all ' + App.state.history.length + ' scanned codes from history?'
     ).then(function (ok) {
       if (!ok) return;
+
+      // Snapshot the exact entries being cleared (same object references,
+      // so entryDbKeys lookups for them still resolve later either way).
+      // Nothing is deleted from IndexedDB yet — only the in-memory list is
+      // emptied — so the undo below is a true restore, not a re-scan.
+      var snapshot = App.state.history.slice();
       App.state.history.length = 0;
       render();
-      App.ui.toast('History cleared.');
-      persistClear();
+
+      App.ui.toast('History cleared.', null, {
+        actionLabel: 'Undo',
+        duration: CLEAR_UNDO_MS,
+        onAction: function () {
+          // Restore in place, ahead of anything scanned during the undo
+          // window (add() would have pushed those onto the now-empty
+          // array, and the array is oldest-first internally — see
+          // getFiltered()'s reverse() — so the snapshot belongs before
+          // them, not after).
+          var scannedDuringWindow = App.state.history.slice();
+          App.state.history.length = 0;
+          Array.prototype.push.apply(App.state.history, snapshot);
+          Array.prototype.push.apply(App.state.history, scannedDuringWindow);
+          render();
+        },
+        onExpire: function () {
+          // Undo window passed untouched — now actually delete. Uses the
+          // same key-scoped persistDelete() Feature 6 built, rather than
+          // a blanket IndexedDB store wipe: if a new code was scanned
+          // during the undo window, it's already in IndexedDB by now
+          // (persistAdd() fires as soon as it's scanned) and must NOT be
+          // swept up in this deferred delete.
+          persistDelete(snapshot);
+        }
+      });
     });
+  }
+
+  // ---- bulk select mode -------------------------------------------------------
+  function toggleSelectMode() {
+    selectMode = !selectMode;
+    selectedEntries.clear();
+    expandedEntry = null;
+    syncSelectFooter();
+    render();
+  }
+
+  function exitSelectMode() {
+    if (!selectMode) return;
+    selectMode = false;
+    selectedEntries.clear();
+    syncSelectFooter();
+    render();
+  }
+
+  function toggleEntrySelected(entry) {
+    if (selectedEntries.has(entry)) {
+      selectedEntries.delete(entry);
+    } else {
+      selectedEntries.add(entry);
+    }
+    syncSelectFooter();
+    render();
+  }
+
+  // "Select all" only ever applies to what's currently visible (respects
+  // the active search/format filter) — selecting everything in a filtered
+  // view shouldn't silently reach into rows the person can't currently see.
+  function selectAllToggle() {
+    var filtered = getFiltered();
+    var allSelected = filtered.length > 0 && filtered.every(function (e) {
+      return selectedEntries.has(e);
+    });
+    filtered.forEach(function (e) {
+      if (allSelected) selectedEntries.delete(e);
+      else selectedEntries.add(e);
+    });
+    syncSelectFooter();
+    render();
+  }
+
+  // Selected rows in current newest-first list order (rather than Set
+  // insertion order), so bulk export stays consistent with the ordering
+  // exportCsv()/exportJson() already use for the non-selected case.
+  function getSelectedRows() {
+    return getFiltered().filter(function (e) { return selectedEntries.has(e); });
+  }
+
+  function deleteSelected() {
+    var count = selectedEntries.size;
+    if (!count) return;
+    App.ui.confirm(
+      'Delete ' + count + ' selected ' + (count === 1 ? 'code' : 'codes') +
+      ' from history? This cannot be undone.'
+    ).then(function (ok) {
+      if (!ok) return;
+      var toDelete = selectedEntries;
+      // Mutate App.state.history in place (length=0 then re-push) rather
+      // than reassigning App.state.history to a new array — clear() above
+      // does the same, since other modules may hold a reference to this
+      // exact array instance.
+      var kept = App.state.history.filter(function (e) { return !toDelete.has(e); });
+      App.state.history.length = 0;
+      Array.prototype.push.apply(App.state.history, kept);
+
+      persistDelete(Array.from(toDelete));
+      selectedEntries.clear();
+      selectMode = false;
+      syncSelectFooter();
+      render();
+      App.ui.toast(count === 1 ? '1 code deleted.' : count + ' codes deleted.');
+    });
+  }
+
+  function syncSelectFooter() {
+    els.footerDefault.hidden = selectMode;
+    els.footerSelect.hidden = !selectMode;
+    if (!selectMode) return;
+
+    els.selectCount.textContent = selectedEntries.size === 1
+      ? '1 selected'
+      : selectedEntries.size + ' selected';
+
+    var filtered = getFiltered();
+    var allSelected = filtered.length > 0 && filtered.every(function (e) {
+      return selectedEntries.has(e);
+    });
+    els.btnSelectAll.textContent = allSelected ? 'Deselect all' : 'Select all';
+
+    var hasSelection = selectedEntries.size > 0;
+    els.btnDeleteSelected.disabled = !hasSelection;
+    els.btnExportSelectedCsv.disabled = !hasSelection;
+    els.btnExportSelectedJson.disabled = !hasSelection;
   }
 
   // ---- format filter dropdown -------------------------------------------------
@@ -218,6 +399,7 @@
     var filtered = getFiltered();
 
     updateCounts();
+    syncSelectFooter();
 
     els.list.innerHTML = '';
 
@@ -268,10 +450,13 @@
   }
 
   function buildItem(entry) {
+    var isSelected = selectMode && selectedEntries.has(entry);
     var item = document.createElement('li');
     item.className = 'history-item' +
       (entry === activeEntry ? ' is-active' : '') +
-      (entry === expandedEntry ? ' is-expanded' : '');
+      (entry === expandedEntry ? ' is-expanded' : '') +
+      (selectMode ? ' is-selectable' : '') +
+      (isSelected ? ' is-selected' : '');
     var time = (App.ui && App.ui.formatHistoryTime)
       ? App.ui.formatHistoryTime(entry.timestamp)
       : new Date(entry.timestamp).toLocaleTimeString();
@@ -281,28 +466,46 @@
     if (entry.valid === false) badges += '<span class="badge badge--danger">Invalid</span>';
     if (entry.duplicate) badges += '<span class="badge badge--warning">Duplicate</span>';
 
-    item.setAttribute('aria-expanded', entry === expandedEntry ? 'true' : 'false');
+    if (selectMode) {
+      // No detail panel is reachable in select mode (expandedEntry is
+      // always null while selecting — see toggleSelectMode()), so
+      // aria-expanded doesn't apply here; the checkbox below carries the
+      // row's selection state instead.
+      item.removeAttribute('aria-expanded');
+    } else {
+      item.setAttribute('aria-expanded', entry === expandedEntry ? 'true' : 'false');
+    }
+
+    var checkboxHtml = selectMode
+      ? '<input type="checkbox" class="history-select-checkbox" aria-label="Select this entry"' +
+        (isSelected ? ' checked' : '') + '>'
+      : '';
 
     item.innerHTML =
       '<div class="history-row1">' +
+        checkboxHtml +
         '<span class="history-time mono">' + time + '</span>' +
         '<span class="history-format">' + escapeHtml(entry.format) + '</span>' +
         badges +
       '</div>' +
       '<div class="history-preview">' + escapeHtml(App.ui.maskWifiRawText(entry.rawText, entry.parsed)) + '</div>';
 
-    // Tap a row to expand/collapse its full detail *inline, within History*.
-    // History stays a self-contained browsable log; Scan's capture panel
-    // only ever reflects the current live session, so browsing history
-    // never silently interrupts an in-progress scan or gets confused with
-    // a fresh capture.
+    // Tap a row to expand/collapse its full detail *inline, within History*
+    // — unless select mode is active, in which case a tap toggles that
+    // row's selection instead (a click on the checkbox itself bubbles up
+    // to this same listener, so it's handled by the same branch rather
+    // than needing a separate checkbox change listener).
     item.addEventListener('click', function () {
+      if (selectMode) {
+        toggleEntrySelected(entry);
+        return;
+      }
       expandedEntry = (expandedEntry === entry) ? null : entry;
       activeEntry = entry;
       render();
     });
 
-    if (entry === expandedEntry) {
+    if (!selectMode && entry === expandedEntry) {
       item.appendChild(buildDetail(entry));
     }
 
@@ -408,6 +611,24 @@
 
     actions.appendChild(btnTxt);
     actions.appendChild(btnJson);
+
+    // Sends this entry's raw payload + format over to the Generate page,
+    // pre-filled (see generator.js's prefill() for why entry.rawText is
+    // used verbatim rather than reconstructed from parsed fields — it
+    // works for every type this app knows about, and never touches the
+    // masked/sensitive on-screen value above, since the mask only ever
+    // affects rendered DOM text, not entry.rawText itself).
+    var btnRegenerate = document.createElement('button');
+    btnRegenerate.className = 'btn btn--sm btn--ghost';
+    btnRegenerate.textContent = 'Regenerate';
+    btnRegenerate.addEventListener('click', function () {
+      if (!App.generator) return;
+      App.ui.setView('generate');
+      App.generator.prefill(entry.rawText, entry.format);
+      App.ui.toast('Sent to Generate \u2014 tap Generate to recreate it.');
+    });
+    actions.appendChild(btnRegenerate);
+
     wrap.appendChild(actions);
 
     return wrap;
@@ -450,8 +671,8 @@
     return fields.map(function (f) { return f.label + ': ' + f.value; }).join(' | ');
   }
 
-  function exportCsv() {
-    var rows = getFiltered();
+  function exportCsv(rows) {
+    rows = rows || getFiltered();
     if (!rows.length) { App.ui.toast('Nothing to export.'); return; }
 
     var header = ['timestamp', 'format', 'rawText', 'valid', 'duplicate', 'details'];
@@ -479,8 +700,8 @@
     App.ui.toast('Exported ' + filename);
   }
 
-  function exportJson() {
-    var rows = getFiltered();
+  function exportJson(rows) {
+    rows = rows || getFiltered();
     if (!rows.length) { App.ui.toast('Nothing to export.'); return; }
     var exportRows = (App.ui && App.ui.buildExportObject)
       ? rows.map(App.ui.buildExportObject)
@@ -493,9 +714,16 @@
   // ---- wiring ------------------------------------------------------------------
   els.search.addEventListener('input', render);
   els.filterFormat.addEventListener('change', render);
-  els.btnExportCsv.addEventListener('click', exportCsv);
-  els.btnExportJson.addEventListener('click', exportJson);
+  els.btnExportCsv.addEventListener('click', function () { exportCsv(); });
+  els.btnExportJson.addEventListener('click', function () { exportJson(); });
   els.btnClear.addEventListener('click', clear);
+
+  els.btnSelectToggle.addEventListener('click', toggleSelectMode);
+  els.btnSelectCancel.addEventListener('click', exitSelectMode);
+  els.btnSelectAll.addEventListener('click', selectAllToggle);
+  els.btnDeleteSelected.addEventListener('click', deleteSelected);
+  els.btnExportSelectedCsv.addEventListener('click', function () { exportCsv(getSelectedRows()); });
+  els.btnExportSelectedJson.addEventListener('click', function () { exportJson(getSelectedRows()); });
 
   App.history = {
     add: add,

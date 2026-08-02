@@ -548,6 +548,15 @@ button { font-family: inherit; }
 .history-item.is-expanded .history-preview { white-space: pre-wrap; word-break: break-all; }
 .history-empty { padding: 40px 18px; text-align: center; color: var(--ink-faint); font-size: 13px; list-style: none; }
 .history-footer { display: flex; gap: 10px; flex-wrap: wrap; }
+.history-footer--select { align-items: center; }
+.history-select-count { font-size: 13px; color: var(--ink-soft); margin-right: auto; }
+
+.history-item.is-selectable { cursor: pointer; }
+.history-item.is-selected { background: var(--brand-soft); }
+.history-select-checkbox {
+  width: 16px; height: 16px; flex-shrink: 0; cursor: pointer;
+  accent-color: var(--brand);
+}
 
 .history-detail {
   margin-top: 12px; padding-top: 12px;
@@ -634,6 +643,55 @@ button { font-family: inherit; }
 }
 .toast.is-shown { opacity: 1; transform: translateY(0); }
 .toast--danger { background: var(--danger); color: #fff; }
+
+/* Action toast (e.g. "History cleared — Undo") — same pill, but a flex row
+   with the message and an inline action button instead of centered text. */
+.toast--action {
+  display: flex; align-items: center; gap: 14px;
+  text-align: left; padding-right: 10px;
+}
+.toast__text { white-space: nowrap; }
+.toast__action {
+  background: none; border: none; padding: 4px 2px;
+  font: inherit; font-weight: 700; color: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer; flex-shrink: 0;
+}
+.toast__action:hover { opacity: .85; }
+
+.status-banner-stack {
+  /* In-flow, not floating — see the HTML comment above this element in
+     index.html for why. Deliberately NOT sticky: History's date-group
+     headers (.history-date-header) are already sticky at this same
+     --sticky-nav-offset, and a second sticky element at that identical
+     offset fights it for the same on-screen slot while scrolling instead
+     of stacking cleanly below it. A status note like this only needs to
+     be seen once, not pinned indefinitely, so it just scrolls away
+     normally like any other content — which also sidesteps the conflict
+     entirely rather than trying to patch the two sticky offsets to
+     coexist. */
+  display: flex; flex-direction: column; gap: 10px;
+}
+.status-banner {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 10px 16px;
+  box-shadow: 0 4px 14px -6px hsl(var(--shadow-color) / .35);
+  /* Margin (not the stack's gap) so a hidden banner contributes zero
+     space — [hidden] is display:none, and flex `gap` only applies
+     between actually-rendered children, but a margin on a display:none
+     element is also simply not rendered, so this stays consistent either
+     way this element's visibility is toggled. */
+  margin-bottom: 4px;
+}
+.status-banner__text { font-size: 13px; font-weight: 500; color: var(--ink); }
+.update-banner__actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: auto; }
+
+.offline-banner__dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--warning);
+}
 
 .confirm-scrim {
   position: fixed; inset: 0; background: rgba(20,24,28,.45);

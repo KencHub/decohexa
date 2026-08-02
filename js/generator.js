@@ -13,6 +13,8 @@
 
    Public surface (per integration contract — do not rename):
      window.ScannerApp.generator.generate(text, format) -> Promise<HTMLCanvasElement>
+     window.ScannerApp.generator.prefill(rawText, format)  // Regenerate round-trip;
+                                                            // fills the form, doesn't render
    ========================================================================== */
 
 (function () {
@@ -341,8 +343,52 @@
   updateBase64Availability();
   updateDecodePreview();
 
+  /**
+   * Pre-fill the Generate form from an existing scan (Scan's live result or
+   * a History entry) — the "Regenerate" round-trip. `rawText` is used
+   * verbatim (it's the literal payload that was scanned, e.g. the full
+   * "WIFI:T:WPA;S:...;P:...;;" string), not reconstructed from parsed
+   * fields, so this is correct for every type with no per-type logic and
+   * without needing to touch any masked/sensitive on-screen value — the
+   * mask only ever affects rendered DOM text, never entry.rawText itself.
+   *
+   * `format` should be one of GENERATE_FORMATS' values (decoder.js's
+   * READ_OPTIONS.formats and this file's GENERATE_FORMATS are kept
+   * symmetric on purpose, so this should always hit); falls back to
+   * 'QRCode' if it somehow doesn't.
+   *
+   * Does not call generate() itself — leaves the canvas empty and lets the
+   * person hit Generate, same as typing input by hand, so they can tweak
+   * the text first if they want.
+   */
+  function prefill(rawText, format) {
+    var formatIsValid = GENERATE_FORMATS.some(function (fmt) { return fmt.value === format; });
+    var useFormat = formatIsValid ? format : 'QRCode';
+
+    if (els.format) {
+      els.format.value = useFormat;
+      try { window.localStorage.setItem(FORMAT_STORAGE_KEY, useFormat); } catch (err) { /* storage unavailable */ }
+    }
+
+    // rawText is already the literal payload as scanned — never re-encode
+    // it as base64 here, or a WiFi/vCard/etc. payload would double-encode.
+    base64Enabled = false;
+    setBase64SwitchVisual(false);
+
+    updateFormatHint();
+    updateBase64Availability();
+
+    els.text.value = rawText == null ? '' : String(rawText);
+    resetHint();
+    updateDecodePreview();
+
+    els.text.focus();
+    if (els.text.scrollIntoView) els.text.scrollIntoView({ block: 'nearest' });
+  }
+
   window.ScannerApp = window.ScannerApp || {};
   window.ScannerApp.generator = {
-    generate: generate
+    generate: generate,
+    prefill: prefill
   };
 })();

@@ -61,6 +61,53 @@
 
   <main class="stage">
 
+    <!-- ============ STATUS BANNER STACK ============
+         In-flow (not floating), shared by two independent notices that
+         can each show/hide on their own — a stale tab can be both
+         offline *and* have a pending update at the same time, so they
+         stack vertically here rather than fighting over the same space.
+         Deliberately NOT position:fixed: an earlier version floated this
+         over the page, but there's no vertical spot that clears every
+         view's header *and* its main content — Scan's camera box,
+         History's list, and Generate's canvas all start almost
+         immediately below each view's (differently-sized) header.
+         Also deliberately NOT position:sticky (a second earlier version
+         was) — History's date-group headers are already sticky at the
+         same --sticky-nav-offset, and this collided with them there
+         instead of stacking cleanly underneath. Sitting here, as a plain
+         normal child of .stage above the active view, it just pushes
+         that view's content down by however tall it is (zero space when
+         both banners are hidden, since [hidden] is display:none and flex
+         `gap` doesn't apply around a fully display:none child), and
+         scrolls away with the rest of the page like the browser's own
+         "No internet connection" bar in the tab chrome — a one-time
+         notice doesn't need to stay pinned on screen. -->
+    <div class="status-banner-stack" id="status-banner-stack">
+
+      <!-- A new service worker installed, but the open tab is still
+           running old code — skipWaiting()/clients.claim() in sw.js mean
+           it's already taken control, so all "Reload" needs to do is
+           re-fetch the page. -->
+      <div class="status-banner update-banner" id="update-banner" role="status" hidden>
+        <span class="status-banner__text">New version available</span>
+        <div class="update-banner__actions">
+          <button class="btn btn--sm btn--primary" id="btn-update-reload">Reload</button>
+          <button class="btn btn--sm btn--ghost" id="btn-update-dismiss" aria-label="Dismiss">Dismiss</button>
+        </div>
+      </div>
+
+      <!-- Shown while navigator.onLine is false. No actions — it clears
+           itself the moment the 'online' event fires, nothing to confirm
+           or dismiss. Camera scanning is fully local (getUserMedia + the
+           vendored ZXing wasm), so it still works offline; the note just
+           says so up front rather than the person wondering. -->
+      <div class="status-banner offline-banner" id="offline-banner" role="status" hidden>
+        <span class="offline-banner__dot" aria-hidden="true"></span>
+        <span class="status-banner__text">You're offline — scanning still works</span>
+      </div>
+
+    </div>
+
     <!-- ============ SCAN VIEW ============ -->
     <section class="view is-active" id="view-scan" data-view-panel="scan">
       <header class="stage__header">
@@ -149,6 +196,7 @@
               <button class="btn btn--sm btn--ghost" id="btn-copy-details" hidden>Copy details</button>
               <button class="btn btn--sm btn--ghost" id="btn-export-txt">Export .txt</button>
               <button class="btn btn--sm btn--ghost" id="btn-export-json">Export .json</button>
+              <button class="btn btn--sm btn--ghost" id="btn-regenerate">Regenerate</button>
             </div>
           </div>
         </aside>
@@ -206,10 +254,25 @@
         <li class="history-empty" id="history-empty">Nothing scanned yet.</li>
       </ul>
 
-      <div class="history-footer">
+      <div class="history-footer" id="history-footer">
         <button class="btn btn--ghost" id="btn-history-export-csv">Export CSV</button>
         <button class="btn btn--ghost" id="btn-history-export-json">Export JSON</button>
+        <button class="btn btn--ghost" id="btn-history-select-toggle">Select</button>
         <button class="btn btn--danger-ghost" id="btn-history-clear">Clear history</button>
+      </div>
+
+      <!-- Replaces the footer above while bulk-selecting. Kept as a
+           separate element rather than swapping button labels in place,
+           since the two states have a different number/kind of controls
+           (Select all, per-selection export/delete, Cancel) — toggling
+           visibility of two whole blocks is simpler than reshuffling one. -->
+      <div class="history-footer history-footer--select" id="history-footer-select" hidden>
+        <span class="history-select-count" id="history-select-count">0 selected</span>
+        <button class="btn btn--sm btn--ghost" id="btn-history-select-all">Select all</button>
+        <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-csv">Export CSV</button>
+        <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-json">Export JSON</button>
+        <button class="btn btn--sm btn--danger-ghost" id="btn-history-delete-selected">Delete</button>
+        <button class="btn btn--sm btn--ghost" id="btn-history-select-cancel">Cancel</button>
       </div>
     </section>
 
@@ -296,6 +359,7 @@
   </div>
 </div>
 
+
 <!-- ============ App state contract (see build spec) ============ -->
 <script>
   window.ScannerApp = window.ScannerApp || {
@@ -336,15 +400,77 @@
 <!-- Registers sw.js so the app shell actually gets cached for offline use.
      Feature-detected since older browsers don't support service workers at
      all; deferred to 'load' so it never competes with the app's own
-     startup work (camera/decoder init) for the main thread. -->
+     startup work (camera/decoder init) for the main thread.
+
+     Also watches for a *new* worker installing after this page already has
+     one controlling it — that's an update landing while the tab is open,
+     not the first-ever visit — and surfaces the update-banner instead of
+     letting sw.js's skipWaiting()/clients.claim() swap the running code
+     out from under the page with no signal. -->
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function (err) {
+      navigator.serviceWorker.register('sw.js').then(function (registration) {
+        // A worker could already be sitting in "waiting" the moment this
+        // tab loads (e.g. it installed while the tab was backgrounded on a
+        // previous visit) — that's still an update relative to whatever
+        // this page just loaded, so check for it immediately too, not only
+        // on a future 'updatefound'.
+        if (registration.waiting && navigator.serviceWorker.controller) {
+          showUpdateBanner();
+        }
+        registration.addEventListener('updatefound', function () {
+          var newWorker = registration.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener('statechange', function () {
+            // 'installed' fires on every install, including the very first
+            // one on a fresh visit — but only show the banner when a
+            // controller already exists, meaning this is a second worker
+            // replacing one that was already running the page.
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              showUpdateBanner();
+            }
+          });
+        });
+      }).catch(function (err) {
         console.warn('Service worker registration failed:', err);
       });
     });
   }
+
+  function showUpdateBanner() {
+    var banner = document.getElementById('update-banner');
+    if (!banner || !banner.hidden) return; // already shown, or an old cached shell without this markup
+    banner.hidden = false;
+  }
+
+  var updateReloadBtn = document.getElementById('btn-update-reload');
+  var updateDismissBtn = document.getElementById('btn-update-dismiss');
+  if (updateReloadBtn) {
+    updateReloadBtn.addEventListener('click', function () { window.location.reload(); });
+  }
+  if (updateDismissBtn) {
+    updateDismissBtn.addEventListener('click', function () {
+      document.getElementById('update-banner').hidden = true;
+    });
+  }
+</script>
+
+<!-- Offline status banner. navigator.onLine plus the 'online'/'offline'
+     window events are enough here — this app makes no fetch/XHR calls of
+     its own (camera decoding is fully local via getUserMedia + the
+     vendored ZXing wasm), so there's no in-flight-request state to
+     reconcile, just "is the browser currently reporting a connection".
+     Set on load too, in case the tab is opened while already offline. -->
+<script>
+  function syncOfflineBanner() {
+    var banner = document.getElementById('offline-banner');
+    if (!banner) return;
+    banner.hidden = navigator.onLine;
+  }
+  window.addEventListener('online', syncOfflineBanner);
+  window.addEventListener('offline', syncOfflineBanner);
+  syncOfflineBanner();
 </script>
 
 </body>

@@ -540,6 +540,17 @@
     App.ui.toast('Exported ' + filename);
   });
 
+  // Sends this result's raw payload + format over to the Generate page,
+  // pre-filled (see generator.js's prefill() for why rawText is used
+  // verbatim rather than reconstructed from parsed fields).
+  document.getElementById('btn-regenerate').addEventListener('click', function () {
+    var result = App.state.currentResult;
+    if (!result || !App.generator) return;
+    App.ui.setView('generate');
+    App.generator.prefill(result.rawText, result.format);
+    App.ui.toast('Sent to Generate \u2014 tap Generate to recreate it.');
+  });
+
   // ---- run the startup check once the page is ready --------------------------
   checkDecoderLoaded();
 })();
