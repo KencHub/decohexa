@@ -41,6 +41,30 @@
   var activeEntry = null;
   var expandedEntry = null;
 
+  // ---- duplicate-count map (backs validators.isDuplicate's O(1) path) -------
+  // Map<dupKey, count> instead of a Set, because history intentionally keeps
+  // duplicate scans (isDuplicate just flags them, it doesn't block adding),
+  // so more than one entry can share the same key — a Set would lose count
+  // and could get emptied out by the first matching delete even while a
+  // second identical entry is still present.
+  if (!(App.state.history._dupKeyCounts instanceof Map)) {
+    App.state.history._dupKeyCounts = new Map();
+  }
+
+  function dupKeyIncr(entry) {
+    var counts = App.state.history._dupKeyCounts;
+    var key = App.validators.dupKey(entry);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  function dupKeyDecr(entry) {
+    var counts = App.state.history._dupKeyCounts;
+    var key = App.validators.dupKey(entry);
+    var next = (counts.get(key) || 0) - 1;
+    if (next <= 0) counts.delete(key);
+    else counts.set(key, next);
+  }
+
   // ---- bulk select mode -------------------------------------------------------
   // selectMode replaces tap-to-expand with tap-to-select on each row (see
   // buildItem()); expandedEntry is deliberately left alone (not restored)
@@ -151,9 +175,9 @@
            entry.format.toLowerCase().indexOf(query) !== -1;
   }
 
-  function updateCounts() {
+  function updateCounts(filtered) {
     var full = App.state.history;
-    var filteredCount = getFiltered().length;
+    var filteredCount = (filtered || getFiltered()).length;
     els.count.textContent = (filteredCount === full.length)
       ? String(full.length)
       : filteredCount + ' / ' + full.length;
@@ -165,6 +189,7 @@
 
   function add(result) {
     App.state.history.push(result);
+    dupKeyIncr(result);
     trackFormat(result.format);
 
     // Fast path: a full render() rebuilds every row in the list, which
@@ -194,8 +219,9 @@
         els.list.insertBefore(buildDateHeader(App.ui.getDateGroupLabel(result.timestamp), todayKey), topNode);
         els.list.insertBefore(buildItem(result), topNode);
       }
-      updateCounts();
-      syncSelectFooter();
+      var filtered = getFiltered();
+      updateCounts(filtered);
+      syncSelectFooter(filtered);
     } else {
       render();
     }
@@ -218,6 +244,10 @@
       // emptied — so the undo below is a true restore, not a re-scan.
       var snapshot = App.state.history.slice();
       App.state.history.length = 0;
+      // Every snapshot entry's count was added via add()'s dupKeyIncr —
+      // clearing the whole map here is equivalent to decrementing each of
+      // them individually, since nothing else is in history at this point.
+      App.state.history._dupKeyCounts.clear();
       render();
 
       App.ui.toast('History cleared.', null, {
@@ -233,6 +263,11 @@
           App.state.history.length = 0;
           Array.prototype.push.apply(App.state.history, snapshot);
           Array.prototype.push.apply(App.state.history, scannedDuringWindow);
+          // Re-count the restored snapshot entries (their counts were
+          // wiped above). scannedDuringWindow entries already went through
+          // add()'s dupKeyIncr when they were scanned, so touching them
+          // again here would double-count them.
+          snapshot.forEach(dupKeyIncr);
           render();
         },
         onExpire: function () {
@@ -253,7 +288,8 @@
     selectMode = !selectMode;
     selectedEntries.clear();
     expandedEntry = null;
-    syncSelectFooter();
+    // render() below calls syncSelectFooter() itself once it has computed
+    // getFiltered() — no need to also call it here first.
     render();
   }
 
@@ -261,7 +297,6 @@
     if (!selectMode) return;
     selectMode = false;
     selectedEntries.clear();
-    syncSelectFooter();
     render();
   }
 
@@ -271,7 +306,6 @@
     } else {
       selectedEntries.add(entry);
     }
-    syncSelectFooter();
     render();
   }
 
@@ -287,7 +321,6 @@
       if (allSelected) selectedEntries.delete(e);
       else selectedEntries.add(e);
     });
-    syncSelectFooter();
     render();
   }
 
@@ -314,17 +347,17 @@
       var kept = App.state.history.filter(function (e) { return !toDelete.has(e); });
       App.state.history.length = 0;
       Array.prototype.push.apply(App.state.history, kept);
+      toDelete.forEach(dupKeyDecr);
 
       persistDelete(Array.from(toDelete));
       selectedEntries.clear();
       selectMode = false;
-      syncSelectFooter();
       render();
       App.ui.toast(count === 1 ? '1 code deleted.' : count + ' codes deleted.');
     });
   }
 
-  function syncSelectFooter() {
+  function syncSelectFooter(filtered) {
     els.footerDefault.hidden = selectMode;
     els.footerSelect.hidden = !selectMode;
     if (!selectMode) return;
@@ -333,7 +366,7 @@
       ? '1 selected'
       : selectedEntries.size + ' selected';
 
-    var filtered = getFiltered();
+    filtered = filtered || getFiltered();
     var allSelected = filtered.length > 0 && filtered.every(function (e) {
       return selectedEntries.has(e);
     });
@@ -398,8 +431,8 @@
     var full = App.state.history;
     var filtered = getFiltered();
 
-    updateCounts();
-    syncSelectFooter();
+    updateCounts(filtered);
+    syncSelectFooter(filtered);
 
     els.list.innerHTML = '';
 
@@ -462,6 +495,7 @@
       : new Date(entry.timestamp).toLocaleTimeString();
 
     var badges = '';
+    if (entry.customLabel) badges += '<span class="badge badge--custom">' + escapeHtml(entry.customLabel) + '</span>';
     if (entry.valid === true) badges += '<span class="badge badge--success">Valid</span>';
     if (entry.valid === false) badges += '<span class="badge badge--danger">Invalid</span>';
     if (entry.duplicate) badges += '<span class="badge badge--warning">Duplicate</span>';
@@ -675,7 +709,7 @@
     rows = rows || getFiltered();
     if (!rows.length) { App.ui.toast('Nothing to export.'); return; }
 
-    var header = ['timestamp', 'format', 'rawText', 'valid', 'duplicate', 'details'];
+    var header = ['timestamp', 'format', 'rawText', 'valid', 'duplicate', 'customLabel', 'details'];
     var lines = [header.join(',')];
     rows.forEach(function (r) {
       var fields = (r.parsed && App.ui && App.ui.describeResultFields)
@@ -688,6 +722,7 @@
         csvEscape(csvForceText(r.rawText)),
         r.valid === null ? '' : String(r.valid),
         String(!!r.duplicate),
+        csvEscape(r.customLabel || ''),
         csvEscape(details)
       ].join(','));
     });
@@ -740,6 +775,7 @@
     if (!entries.length) return;
     entries.forEach(function (entry) {
       App.state.history.push(entry);
+      dupKeyIncr(entry);
       trackFormat(entry.format);
     });
     render();

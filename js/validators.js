@@ -75,8 +75,28 @@
     }
   }
 
+  // Shared key format for the O(1) duplicate-count map history.js maintains
+  // on App.state.history._dupKeyCounts. '\0' can't appear in either rawText
+  // or format from any real scan, so it's a safe join separator.
+  function dupKey(entry) {
+    return entry.format + '\0' + entry.rawText;
+  }
+
   function isDuplicate(result, history) {
     if (!result || !history || !history.length) return false;
+
+    // Fast path: history.js keeps a Map<key, count> in sync with every
+    // push/delete/undo/load, so this is an O(1) lookup instead of an O(n)
+    // scan over the whole array on every single scan (which made batch
+    // mode O(n^2) over a session).
+    var counts = history._dupKeyCounts;
+    if (counts instanceof Map) {
+      return counts.has(dupKey(result));
+    }
+
+    // Fallback: only reached if something (e.g. a test harness) passes a
+    // plain array without the count map attached. Keeps isDuplicate()
+    // correct on its own even without history.js's bookkeeping.
     return history.some(function (entry) {
       return entry.rawText === result.rawText && entry.format === result.format;
     });
@@ -85,6 +105,7 @@
   window.ScannerApp = window.ScannerApp || {};
   window.ScannerApp.validators = {
     checkChecksum: checkChecksum,
-    isDuplicate: isDuplicate
+    isDuplicate: isDuplicate,
+    dupKey: dupKey
   };
 })();

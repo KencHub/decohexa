@@ -234,9 +234,18 @@
   }
 
   function applyCustomLabelBadge(result) {
+    var rule = matchRule(result.rawText);
+
+    // Persisted onto the result object itself (not just the live badge)
+    // so the match survives into History rows/detail and CSV/JSON export,
+    // not just the instant the live Scan panel is showing it. Explicit
+    // null (not just "leave it unset") so a scan that matches no rule
+    // still gets a defined field, distinguishing "checked, no match" from
+    // "never checked" for anything reading this later (e.g. export).
+    result.customLabel = rule ? rule.label : null;
+
     var badge = ensureCustomBadge();
     if (!badge) return;
-    var rule = matchRule(result.rawText);
     if (rule) {
       badge.textContent = rule.label;
       badge.hidden = false;
