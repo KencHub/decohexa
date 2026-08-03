@@ -234,6 +234,13 @@
     new MutationObserver(rebuildOptions).observe(select, { childList: true });
     // Keep in sync if something else sets select.value programmatically.
     select.addEventListener('change', syncTrigger);
+    // A separate, side-effect-free "just repaint" signal for the same case
+    // (something else set .value directly). Deliberately not reusing
+    // 'change' here: several selects have real 'change' handlers with
+    // business-logic side effects (persisting a value, re-filtering,
+    // showing a toast) that shouldn't re-run just because a caller wants
+    // the visible box to catch up to a value it already set.
+    select.addEventListener('scannerapp:syncselect', syncTrigger);
 
     rebuildOptions();
   }

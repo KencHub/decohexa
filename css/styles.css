@@ -544,10 +544,14 @@ button { font-family: inherit; }
 .recent-generated__list-wrap.has-overflow-left::before { opacity: 1; }
 .recent-generated__list-wrap.has-overflow-right::after { opacity: 1; }
 
+/* Desktop: this strip sits inside the narrower .generate-below column
+   (see above), so a horizontal scroll strip no longer makes sense —
+   wraps into a grid so items use the available width instead of
+   scrolling. Reset back to a horizontal-scroll strip at the 980px
+   breakpoint below, matching .recent-scans' mobile behavior. */
 .recent-generated__list {
-  display: flex; gap: 10px; margin: 0; padding: 0 2px 2px; list-style: none;
-  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin;
-  scroll-snap-type: x proximity;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px; margin: 0; padding: 0 2px 2px; list-style: none;
 }
 .recent-generated__item {
   flex: 0 0 auto; min-width: 132px; max-width: 200px;
@@ -623,8 +627,16 @@ button { font-family: inherit; }
   padding: 22px;
 }
 .generate-preview {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  min-height: 260px;
+}
+.generate-preview__result {
   display: flex; flex-direction: column; align-items: center; text-align: center;
-  min-height: 340px; justify-content: center;
+  animation: generate-preview-in .2s ease;
+}
+@keyframes generate-preview-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .generate-preview__canvas-wrap {
   background: #fff; border-radius: var(--radius-md);
@@ -632,6 +644,25 @@ button { font-family: inherit; }
 }
 .generate-preview__canvas-wrap canvas { display: block; image-rendering: pixelated; }
 .generate-preview__hint { font-size: 12.5px; color: var(--ink-faint); margin: 14px 0; }
+
+/* ---- preview empty state — shown until a barcode exists, so the desktop
+   preview box never sits as a blank/reserved rectangle (see .generate-below
+   width note below for the mobile side of this). ---- */
+.generate-preview__empty { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.generate-preview__empty-icon { width: 44px; height: 44px; color: var(--ink-faint); opacity: .55; }
+.generate-preview__empty-text { font-size: 12.5px; color: var(--ink-faint); margin: 0; }
+
+/* Status/error line lives in the form now (always visible, no dependency
+   on the preview box existing) — reuses .field-hint's sizing, with a
+   distinct color for the error state. */
+.field-hint--error { color: var(--danger); font-weight: 600; }
+
+/* ---- shared width for everything below the form/preview row, so the
+   page reads as one consistent column width on desktop instead of a
+   narrow form giving way to full-stage-width sections underneath it.
+   Reset to full width in the 980px breakpoint below, where
+   .generate-layout itself collapses to a single column. ---- */
+.generate-below { max-width: 380px; }
 
 /* ---- batch generate (#13) ---- */
 .batch-generate {
@@ -662,6 +693,10 @@ button { font-family: inherit; }
 .batch-generate[open] summary::before { transform: rotate(90deg); }
 .batch-generate__body { padding: 2px 0 18px; }
 .batch-generate__hint { font-size: 12.5px; color: var(--ink-faint); margin: 12px 0 0; }
+/* Same specificity as .field-hint--error, and this rule comes later in the
+   cascade — without this compound selector, the gray color above would
+   silently win over red on error, even with the class correctly applied. */
+.batch-generate__hint.field-hint--error { color: var(--danger); font-weight: 600; }
 .batch-generate__results {
   list-style: none;
   margin: 10px 0 0;
@@ -686,6 +721,26 @@ button { font-family: inherit; }
    ========================================================================== */
 .history-controls { display: flex; gap: 10px; }
 .field--search { width: 220px; }
+
+/* Custom search-clear button, replacing the browser's native one.
+   type="search" inputs get a built-in clear "x" from the browser, but it
+   can't be styled — it renders in the browser's own default color
+   regardless of the app's theme, which looks out of place next to the
+   app's teal/dark palette. Hide the native icon and draw our own instead,
+   so it's colored, sized, and positioned to match the rest of the UI, and
+   looks the same across browsers instead of varying by platform. */
+.search-field { position: relative; flex: 1 1 auto; }
+.search-field .field--search { width: 100%; padding-right: 34px; }
+.search-field .field--search::-webkit-search-cancel-button,
+.search-field .field--search::-webkit-search-decoration { display: none; }
+.search-field__clear {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 50%;
+  color: var(--ink-faint); cursor: pointer; padding: 0;
+}
+.search-field__clear:hover { color: var(--ink-soft); background: var(--surface-sunken); }
+.search-field__clear svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
 .history-list {
   list-style: none; margin: 0 0 18px; padding: 0;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -788,9 +843,56 @@ button { font-family: inherit; }
 .settings-panel__header h2 { font-size: 17px; font-weight: 600; }
 .settings-panel__body { overflow-y: auto; padding: 8px 22px 30px; flex: 1; }
 
-.settings-card { padding: 18px 0; border-bottom: 1px solid var(--border); }
+.settings-card { padding: 4px 0; border-bottom: 1px solid var(--border); }
 .settings-card:last-child { border-bottom: none; }
-.settings-card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); margin-bottom: 12px; }
+.settings-card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); margin: 0; }
+
+/* Static (non-accordion) section header — same visual rhythm as the
+   collapsible .settings-card__toggle header (14px vertical padding) but
+   plain text, no button/chevron, since there's nothing to expand. Used
+   for sections that are either single-control (Preferences, History) or
+   read-only (Storage, Data, Keyboard shortcuts) — see index.html. */
+.settings-card__static-header { padding: 14px 0 4px; }
+.settings-card--static .settings-card__body { padding-bottom: 14px; }
+
+/* Collapsible header — the whole row is a button so it's a comfortable
+   tap target, not just the tiny chevron icon. */
+.settings-card__toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 14px 0; margin: 0; border: none; background: none;
+  cursor: pointer; text-align: left; color: inherit; font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-card__chevron {
+  width: 16px; height: 16px; flex-shrink: 0; color: var(--brand);
+  fill: none; stroke: currentColor;
+  transition: transform .2s ease;
+}
+.settings-card__toggle-icon {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background .15s ease;
+}
+.settings-card__toggle:hover .settings-card__toggle-icon,
+.settings-card__toggle:focus-visible .settings-card__toggle-icon {
+  background: var(--brand-soft);
+}
+/* Tied to the button's real aria-expanded state, not just hover/focus —
+   previously the teal fill only appeared transiently on hover/touch-focus,
+   so it looked like an "open" indicator but wasn't actually one (it could
+   show on a collapsed card you'd merely tapped, and disappear from an
+   open one you hadn't touched). Now color and chevron direction always
+   agree, both driven by the same aria-expanded value. */
+.settings-card__toggle[aria-expanded="true"] .settings-card__toggle-icon {
+  background: var(--brand-soft);
+}
+.settings-card__toggle:focus-visible { outline: none; }
+.settings-card__toggle:focus-visible .settings-card__chevron { color: var(--brand-strong); }
+.settings-card__toggle[aria-expanded="true"] .settings-card__chevron { transform: rotate(180deg); }
+.settings-card__body { padding-bottom: 14px; }
+.settings-card__body[hidden] { display: none; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }
 .settings-row__label { font-size: 13.5px; font-weight: 500; margin: 0; }
 .settings-row__hint { font-size: 12px; color: var(--ink-faint); margin: 2px 0 0; }
@@ -933,9 +1035,30 @@ button { font-family: inherit; }
   .capture-panel { position: static; min-height: 0; }
   .capture-panel__empty { padding: 16px 6px; }
   .generate-layout { grid-template-columns: 1fr; }
+
+  /* Preview box: back to hidden-until-generated on mobile/tablet — no
+     large empty box before there's anything to show. .has-result is
+     toggled by generator.js alongside the existing empty/result swap. */
+  .generate-preview { display: none; min-height: 0; }
+  .generate-preview.has-result { display: flex; }
+
+  /* Batch generate + recently generated go back to full width, matching
+     the form above (which is also full width at this breakpoint). */
+  .generate-below { max-width: none; }
+
+  /* Recently generated goes back to a horizontal-scroll strip — same
+     reasoning as .recent-scans on the Scan page at this width. */
+  .recent-generated__list {
+    display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin; scroll-snap-type: x proximity;
+  }
+  .recent-generated__item { flex: 0 0 auto; min-width: 132px; max-width: 200px; }
 }
 
 @media (max-width: 720px) {
+  /* Keyboard shortcuts (Space/C/E) are meaningless on a touchscreen —
+     don't spend mobile scroll space on a desktop-only reference card. */
+  .settings-card--desktop-only { display: none; }
   #app { flex-direction: column; }
   .rail {
     /* Was horizontal-but-fixed-width, which clipped the last item
@@ -958,7 +1081,17 @@ button { font-family: inherit; }
   .rail__spacer { display: none; }
   .rail__item--settings { flex: 1 1 0; }
   .stage { padding: 20px 16px 90px; }
-  .field--search { width: 150px; }
+
+  /* History header: was only wrapping to a second row when the count-pill
+     text happened to be long enough ("44 / 51" vs "51") to not fit next to
+     the search+filter controls — same screen size, different layout,
+     depending on whether a filter was active. Force it to always be two
+     rows at this width instead, so it's consistent regardless of filter
+     state. #view-history scopes this to History only; Scan/Generate headers
+     are unaffected. */
+  #view-history .stage__header h1 { flex: 1 1 100%; }
+  #view-history .stage__header .history-controls { flex: 1 1 100%; }
+  #view-history .search-field { flex: 1 1 auto; min-width: 0; }
 }
 
 @media (max-width: 400px) {

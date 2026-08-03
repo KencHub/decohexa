@@ -30,6 +30,10 @@
     base64Row: document.getElementById('generator-base64-row'),
     base64Switch: document.getElementById('switch-generator-base64'),
     btnGenerate: document.getElementById('btn-generate'),
+    status: document.getElementById('generator-status'),
+    previewWrap: document.getElementById('generate-preview'),
+    previewEmpty: document.getElementById('generate-preview-empty'),
+    previewResult: document.getElementById('generate-preview-result'),
     canvas: document.getElementById('generator-canvas'),
     hint: document.getElementById('generator-hint'),
     btnDownload: document.getElementById('btn-generator-download'),
@@ -46,8 +50,6 @@
   // (matches the rest of the Generate form, which is scratch/session input,
   // not a saved setting) — starts off on every load.
   var base64Enabled = false;
-
-  var DEFAULT_HINT = 'Enter text and generate to preview here.';
 
   // Bumped on every generate() call and every input/format change so an
   // in-flight (async) generate response can tell it's stale and bail out
@@ -401,6 +403,7 @@
   function openRecentGenerated(entry) {
     if (els.format) {
       els.format.value = entry.format;
+      els.format.dispatchEvent(new Event('scannerapp:syncselect'));
       try { window.localStorage.setItem(FORMAT_STORAGE_KEY, entry.format); } catch (err) { /* storage unavailable */ }
     }
     base64Enabled = !!entry.base64;
@@ -423,25 +426,61 @@
     'encode-failed': 'That text is too long (or otherwise can\u2019t be encoded) for the selected format. Try shortening it or choosing a different format.'
   };
 
+  // Status/error feedback now lives in the form (#generator-status), not
+  // inside the preview box — the preview box is hidden entirely until a
+  // result exists, so it can no longer double as the place errors show up.
+  function setStatus(text, isError) {
+    if (!els.status) return;
+    els.status.textContent = text || '';
+    els.status.classList.toggle('field-hint--error', !!isError);
+  }
+
+  // Same red-for-errors / gray-for-everything-else treatment as setStatus()
+  // above, applied to the batch form's own hint line — kept as a separate
+  // function (not a shared one) because the batch and single-code forms
+  // are two independent flows with their own elements, not because the
+  // visual rule should differ between them.
+  function setBatchStatus(text, isError) {
+    if (!els.batchHint) return;
+    els.batchHint.textContent = text || '';
+    els.batchHint.classList.toggle('field-hint--error', !!isError);
+  }
+
+  // Swaps the preview box between its empty state (icon + caption) and its
+  // result state (canvas + download button). On desktop the box itself is
+  // always visible (see styles.css) so the empty state is what shows there
+  // by default; on mobile the whole box stays hidden until has-result is
+  // added (also in styles.css, 980px breakpoint), matching the previous
+  // hidden-until-generated behavior for narrow screens.
+  function showPreviewResult(hasResult) {
+    if (!els.previewWrap) return;
+    els.previewWrap.classList.toggle('has-result', !!hasResult);
+    if (els.previewEmpty) els.previewEmpty.hidden = !!hasResult;
+    if (els.previewResult) els.previewResult.hidden = !hasResult;
+  }
+
   function handleGenerateClick() {
     var format = els.format ? els.format.value : 'QRCode';
     var token = ++generationToken;
 
     els.btnGenerate.disabled = true;
-    els.hint.textContent = 'Generating\u2026';
+    setStatus('Generating\u2026', false);
 
     generate(els.text.value, format, { base64: base64Enabled })
       .then(function () {
         if (token !== generationToken) return; // a newer request/edit supersedes this one
         canvasFormat = format;
+        setStatus('', false);
         els.hint.textContent = 'Generated ' + new Date().toLocaleTimeString() + '.';
         els.btnDownload.hidden = false;
+        showPreviewResult(true);
         pushRecentGenerated(els.text.value.trim(), format, base64Enabled);
       })
       .catch(function (err) {
         if (token !== generationToken) return;
-        els.hint.textContent = (err && GENERATE_ERROR_COPY[err.code]) || 'Could not generate a barcode from that text.';
+        setStatus((err && GENERATE_ERROR_COPY[err.code]) || 'Could not generate a barcode from that text.', true);
         els.btnDownload.hidden = true;
+        showPreviewResult(false);
         clearCanvas();
       })
       .then(function () {
@@ -676,7 +715,7 @@
     var toProcess = lines.filter(function (l) { return !l.blank; });
 
     if (!toProcess.length) {
-      if (els.batchHint) els.batchHint.textContent = 'Add at least one line to batch-generate.';
+      setBatchStatus('Add at least one line to batch-generate.', true);
       renderBatchResults([], 0);
       return;
     }
@@ -692,7 +731,7 @@
     var chain = Promise.resolve();
     toProcess.forEach(function (item, i) {
       chain = chain.then(function () {
-        if (els.batchHint) els.batchHint.textContent = 'Generating ' + (i + 1) + ' of ' + toProcess.length + '\u2026';
+        setBatchStatus('Generating ' + (i + 1) + ' of ' + toProcess.length + '\u2026', false);
         return encodeOneForBatch(item.text, format, base64Enabled)
           .then(function (blob) {
             var filename = pad(i + 1) + '-' + format.toLowerCase() + '-' + sanitizeForFilename(item.text) + '.png';
@@ -713,10 +752,8 @@
       renderBatchResults(failedResults, skippedCount);
 
       if (!okResults.length) {
-        if (els.batchHint) {
-          els.batchHint.textContent = 'Nothing generated \u2014 ' + failedResults.length +
-            ' line' + (failedResults.length === 1 ? '' : 's') + ' failed.';
-        }
+        setBatchStatus('Nothing generated \u2014 ' + failedResults.length +
+          ' line' + (failedResults.length === 1 ? '' : 's') + ' failed.', true);
         els.btnBatch.disabled = false;
         els.batchText.disabled = false;
         return;
@@ -737,13 +774,13 @@
           if (failedResults.length) extras.push(failedResults.length + ' failed');
           if (skippedCount) extras.push(skippedCount + ' blank line' + (skippedCount === 1 ? '' : 's') + ' skipped');
           if (els.batchHint) {
-            els.batchHint.textContent = 'Generated ' + okResults.length + ' code' + (okResults.length === 1 ? '' : 's') +
-              ' \u2192 ' + zipName + (extras.length ? ' (' + extras.join(', ') + ')' : '');
+            setBatchStatus('Generated ' + okResults.length + ' code' + (okResults.length === 1 ? '' : 's') +
+              ' \u2192 ' + zipName + (extras.length ? ' (' + extras.join(', ') + ')' : ''), false);
           }
           if (App.ui && App.ui.toast) App.ui.toast('Downloaded ' + zipName);
         })
         .catch(function () {
-          if (els.batchHint) els.batchHint.textContent = 'Could not build the zip file.';
+          setBatchStatus('Could not build the zip file.', true);
         })
         .then(function () {
           els.btnBatch.disabled = false;
@@ -756,11 +793,10 @@
 
   function resetHint() {
     generationToken++; // invalidate any generate() still in flight
-    if (els.hint.textContent !== DEFAULT_HINT) {
-      els.hint.textContent = DEFAULT_HINT;
-      els.btnDownload.hidden = true;
-    }
+    setStatus('', false);
+    els.btnDownload.hidden = true;
     if (canvasFormat !== null) clearCanvas();
+    showPreviewResult(false);
   }
   els.text.addEventListener('input', function () {
     resetHint();
@@ -807,6 +843,7 @@
 
     if (els.format) {
       els.format.value = useFormat;
+      els.format.dispatchEvent(new Event('scannerapp:syncselect'));
       try { window.localStorage.setItem(FORMAT_STORAGE_KEY, useFormat); } catch (err) { /* storage unavailable */ }
     }
 

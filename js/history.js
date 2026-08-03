@@ -67,6 +67,7 @@
     count: document.getElementById('history-count'),
     railBadge: document.getElementById('nav-history-badge'),
     search: document.getElementById('history-search'),
+    searchClear: document.getElementById('history-search-clear'),
     filterFormat: document.getElementById('history-filter-format'),
     btnExportCsv: document.getElementById('btn-history-export-csv'),
     btnExportJson: document.getElementById('btn-history-export-json'),
@@ -433,7 +434,9 @@
     // an entry the person could already see.
     if (!isEntryUnderCurrentFilters(entry)) {
       els.search.value = '';
+      syncSearchClearVisibility();
       els.filterFormat.value = '';
+      els.filterFormat.dispatchEvent(new Event('scannerapp:syncselect'));
     }
 
     expandedEntry = entry;
@@ -731,6 +734,70 @@
     }
   }
 
+  // ---- search indexing --------------------------------------------------------
+  // Search used to only check entry.rawText + entry.format, which meant two
+  // things visible right on screen were unfindable: custom labels (the
+  // "label Test" tags), and — for anything wrapped in an extra decode step
+  // (json/base64json/jwt) — the human-readable decoded content, since only
+  // the undecoded raw string (e.g. a Base64 blob) was ever checked.
+  //
+  // Fix: build one combined lowercased "search index" string per entry that
+  // also includes customLabel and, where applicable, the decoded/pretty
+  // content. Deliberately EXCLUDES the WiFi password: it's dot-masked in the
+  // UI on purpose, and letting search match its plaintext (which sits right
+  // inside rawText, e.g. "WIFI:T:WPA;S:...;P:secret;;") would quietly punch
+  // a hole through that masking. Everything else about a WiFi entry (SSID,
+  // encryption, etc.) is still fully searchable via rawText as before.
+  //
+  // Cached in a WeakMap (not a property on the entry itself) so it: (a)
+  // costs nothing until an entry is actually searched, (b) never gets
+  // rebuilt on every keystroke, and (c) can never leak into CSV/JSON export
+  // or IndexedDB persistence, both of which copy the entry's own enumerable
+  // fields directly. Entries are immutable after add() (customLabel is set
+  // once, before add() is ever called — see settings.js) so a single cached
+  // value per entry is always safe, no invalidation needed.
+  var searchIndexCache = new WeakMap();
+
+  function buildSearchIndex(entry) {
+    var parts = [entry.rawText, entry.format];
+    if (entry.customLabel) parts.push(entry.customLabel);
+
+    var parsed = entry.parsed;
+    if (parsed) {
+      if (parsed.type === 'wifi' && parsed.data && parsed.data.password) {
+        // Strip the password out of the rawText copy already in parts[0] —
+        // do it here (once, cached) rather than reaching back into
+        // entry.rawText anywhere else, so the entry itself is untouched.
+        parts[0] = parts[0].split(parsed.data.password).join('');
+      } else if ((parsed.type === 'json' || parsed.type === 'base64json') && parsed.data) {
+        parts.push(parsed.data.pretty);
+      } else if (parsed.type === 'jwt' && parsed.data) {
+        parts.push(JSON.stringify(parsed.data.header), JSON.stringify(parsed.data.payload));
+      }
+    }
+
+    return parts.join(' ').toLowerCase();
+  }
+
+  function getSearchIndex(entry) {
+    var cached = searchIndexCache.get(entry);
+    if (cached !== undefined) return cached;
+    var index = buildSearchIndex(entry);
+    searchIndexCache.set(entry, index);
+    return index;
+  }
+
+  // ---- custom search-clear button -------------------------------------------
+  // Only shown once there's something to clear. Called both on user typing
+  // and after any programmatic reset of els.search.value (e.g. focusEntry()
+  // above), since setting .value in JS doesn't fire an 'input' event to
+  // trigger this automatically — same underlying gotcha as the dropdown
+  // repaint issue elsewhere in this app, just for a plain <input> instead of
+  // the custom-select wrapper.
+  function syncSearchClearVisibility() {
+    if (els.searchClear) els.searchClear.hidden = !els.search.value;
+  }
+
   // ---- filtering ------------------------------------------------------------
   function getFiltered() {
     var query = (els.search.value || '').trim().toLowerCase();
@@ -739,8 +806,7 @@
     var matches = App.state.history.filter(function (entry) {
       if (format && entry.format !== format) return false;
       if (!query) return true;
-      return entry.rawText.toLowerCase().indexOf(query) !== -1 ||
-             entry.format.toLowerCase().indexOf(query) !== -1;
+      return getSearchIndex(entry).indexOf(query) !== -1;
     });
 
     // Newest first. Centralized here (rather than each caller reversing on
@@ -1523,7 +1589,18 @@
   }
 
   // ---- wiring ------------------------------------------------------------------
-  els.search.addEventListener('input', render);
+  els.search.addEventListener('input', function () {
+    syncSearchClearVisibility();
+    render();
+  });
+  if (els.searchClear) {
+    els.searchClear.addEventListener('click', function () {
+      els.search.value = '';
+      syncSearchClearVisibility();
+      els.search.focus();
+      render();
+    });
+  }
   els.filterFormat.addEventListener('change', render);
   els.btnExportCsv.addEventListener('click', function () { exportCsv(); });
   els.btnExportJson.addEventListener('click', function () { exportJson(); });

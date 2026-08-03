@@ -33,6 +33,8 @@
     scrim: document.getElementById('settings-scrim'),
     drawer: document.getElementById('settings-drawer'),
 
+    cardToggles: document.querySelectorAll('.settings-card__toggle'),
+
     switchTheme: document.getElementById('switch-theme'),
     switchSound: document.getElementById('switch-sound'),
     switchVibration: document.getElementById('switch-vibration'),
@@ -47,6 +49,7 @@
     ruleList: document.getElementById('settings-rule-list'),
 
     selectRetention: document.getElementById('settings-retention-mode'),
+    retentionLabel: document.getElementById('settings-retention-label'),
 
     storageCount: document.getElementById('settings-storage-count'),
     storageSize: document.getElementById('settings-storage-size'),
@@ -133,6 +136,24 @@
     return undefined;
   }
 
+  // ---- collapsible settings cards ---------------------------------------
+  // Each card's <h3> header is now a button (.settings-card__toggle)
+  // controlling a sibling .settings-card__body via [hidden] + aria-expanded.
+  // Only "Custom label rules" uses this pattern now — every other section
+  // was reworked into a static, always-visible block (see index.html)
+  // since none of them had enough content to justify hiding it behind a tap.
+  els.cardToggles.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var card = btn.closest('.settings-card');
+      var body = document.getElementById(btn.getAttribute('aria-controls'));
+      if (!body) return;
+      var expanded = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+      body.hidden = expanded;
+      if (card) card.classList.toggle('is-collapsed', expanded);
+    });
+  });
+
   if (els.switchTheme) els.switchTheme.addEventListener('click', function () { toggle('theme'); });
   if (els.switchSound) els.switchSound.addEventListener('click', function () { toggle('sound'); });
   if (els.switchVibration) els.switchVibration.addEventListener('click', function () { toggle('vibration'); });
@@ -168,6 +189,16 @@
     try { window.localStorage.setItem(RETENTION_STORAGE_KEY, str); } catch (err) { /* storage unavailable */ }
   }
 
+  // Keeps the section header itself showing the live current choice (e.g.
+  // "History retention — Keep last 500 entries") so the active setting is
+  // visible without opening the dropdown — see the "no accordion" rework
+  // of this section in index.html.
+  function updateRetentionLabel() {
+    if (!els.retentionLabel || !els.selectRetention) return;
+    var opt = els.selectRetention.options[els.selectRetention.selectedIndex];
+    els.retentionLabel.textContent = 'History retention — ' + (opt ? opt.textContent : 'Keep everything');
+  }
+
   function loadRetentionValue() {
     try {
       var raw = window.localStorage.getItem(RETENTION_STORAGE_KEY);
@@ -186,6 +217,7 @@
       var value = els.selectRetention.value;
       App.state.settings.retention = parseRetentionValue(value);
       persistRetention(value);
+      updateRetentionLabel();
 
       // Forced, so a newly-tightened rule (e.g. switching from "Keep
       // everything" to "Keep last 500") visibly trims right away instead of
@@ -421,6 +453,8 @@
     setSwitchVisual(els.switchVibration, s.vibration);
     syncBatchModeUI();
     if (els.selectRetention) els.selectRetention.value = data.retention;
+    if (els.selectRetention) els.selectRetention.dispatchEvent(new Event('scannerapp:syncselect'));
+    updateRetentionLabel();
     renderRuleList();
     updateRegexSandbox();
   }
@@ -684,7 +718,9 @@
   if (els.selectRetention) {
     var savedRetention = loadRetentionValue();
     els.selectRetention.value = savedRetention;
+    els.selectRetention.dispatchEvent(new Event('scannerapp:syncselect'));
     App.state.settings.retention = parseRetentionValue(savedRetention);
+    updateRetentionLabel();
     // No applyRetention(true) call here by design — history.js's own
     // loadPersisted().then() callback calls it once rehydration finishes,
     // and by then this synchronous init has already set the state above.

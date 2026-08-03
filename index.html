@@ -248,52 +248,87 @@
           </div>
 
           <button class="btn btn--primary" id="btn-generate" style="margin-top:14px;">Generate barcode</button>
+          <p class="field-hint" id="generator-status" aria-live="polite"></p>
         </div>
 
-        <div class="generate-preview">
-          <div class="generate-preview__canvas-wrap">
-            <canvas id="generator-canvas" width="220" height="220"></canvas>
+        <!-- On desktop (see .generate-layout's 980px breakpoint) this box
+             is always visible, showing #generate-preview-empty (icon +
+             caption) until a barcode exists, then swapping to
+             #generate-preview-result. On mobile/tablet the whole box stays
+             hidden until a barcode exists (has-result class, toggled by
+             generator.js) — no large empty box before there's anything to
+             show. Status/error messages live in #generator-status above
+             (always visible in the form) regardless of which state this
+             box is in. -->
+        <div class="generate-preview" id="generate-preview">
+          <div class="generate-preview__empty" id="generate-preview-empty">
+            <svg class="generate-preview__empty-icon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="6" y="10" width="3" height="28" fill="currentColor"/>
+              <rect x="12" y="10" width="2" height="28" fill="currentColor"/>
+              <rect x="17" y="10" width="4" height="28" fill="currentColor"/>
+              <rect x="24" y="10" width="2" height="28" fill="currentColor"/>
+              <rect x="29" y="10" width="3" height="28" fill="currentColor"/>
+              <rect x="35" y="10" width="2" height="28" fill="currentColor"/>
+              <rect x="40" y="10" width="3" height="28" fill="currentColor"/>
+            </svg>
+            <p class="generate-preview__empty-text">Your barcode will appear here</p>
           </div>
-          <p class="generate-preview__hint" id="generator-hint">Enter text and generate to preview here.</p>
-          <button class="btn btn--ghost" id="btn-generator-download" hidden>Download PNG</button>
+          <div class="generate-preview__result" id="generate-preview-result" hidden>
+            <div class="generate-preview__canvas-wrap">
+              <canvas id="generator-canvas" width="220" height="220"></canvas>
+            </div>
+            <p class="generate-preview__hint" id="generator-hint"></p>
+            <button class="btn btn--ghost" id="btn-generator-download" hidden>Download PNG</button>
+          </div>
         </div>
       </div>
 
-      <!-- Batch generate → zip (#13). A <details> disclosure (matches the
-           "Raw text" pattern already used on the Scan page's capture card)
-           rather than a mode toggle on the form above, since batch input is
-           genuinely separate scratch input from the single-code textarea,
-           not an alternate view of the same field — both can be used
-           independently without one clobbering the other's state. Shares
-           the format dropdown / base64 switch above rather than duplicating
-           them, since a batch run is one format applied to many lines. -->
-      <details class="batch-generate" id="batch-generate">
-        <summary>Batch generate (multiple codes → zip)</summary>
-        <div class="batch-generate__body">
-          <label class="field-label" for="generator-batch-text">One code per line</label>
-          <textarea class="field field--textarea" id="generator-batch-text" placeholder="One line per code&#10;Uses the barcode format selected above"></textarea>
-          <p class="field-hint">Blank lines are skipped. Each line becomes one PNG in the downloaded zip.</p>
-          <button class="btn btn--primary" id="btn-generate-batch">Generate zip</button>
-          <p class="batch-generate__hint" id="generator-batch-hint"></p>
-          <ul class="batch-generate__results" id="generator-batch-results" hidden></ul>
-        </div>
-      </details>
+      <!-- Wrapped so batch-generate + recent-generated share the form
+           column's width (see .generate-layout above) instead of
+           stretching full-stage-width underneath a narrower form — keeps
+           one consistent width down the page on wide screens. On mobile
+           (980px breakpoint) this simply becomes full width again since
+           .generate-layout itself collapses to one column there. -->
+      <div class="generate-below">
+        <!-- Batch generate → zip (#13). A <details> disclosure (matches the
+             "Raw text" pattern already used on the Scan page's capture card)
+             rather than a mode toggle on the form above, since batch input is
+             genuinely separate scratch input from the single-code textarea,
+             not an alternate view of the same field — both can be used
+             independently without one clobbering the other's state. Shares
+             the format dropdown / base64 switch above rather than duplicating
+             them, since a batch run is one format applied to many lines. -->
+        <details class="batch-generate" id="batch-generate">
+          <summary>Batch generate (multiple codes → zip)</summary>
+          <div class="batch-generate__body">
+            <label class="field-label" for="generator-batch-text">One code per line</label>
+            <textarea class="field field--textarea" id="generator-batch-text" placeholder="One line per code&#10;Uses the barcode format selected above"></textarea>
+            <p class="field-hint">Blank lines are skipped. Each line becomes one PNG in the downloaded zip.</p>
+            <button class="btn btn--primary" id="btn-generate-batch">Generate zip</button>
+            <p class="batch-generate__hint" id="generator-batch-hint"></p>
+            <ul class="batch-generate__results" id="generator-batch-results" hidden></ul>
+          </div>
+        </details>
 
-      <!-- "Recently generated" strip (#14) — mirrors the "Last few scans"
-           strip pattern (Split 4b, #18) structurally, but is its own
-           self-contained data source: generated codes never touch scan
-           History, so this is generator.js's own small capped list,
-           persisted to localStorage directly (there's no IndexedDB store
-           to slice a "recent" view out of here — the capped list itself
-           *is* the store). Hidden via the `hidden` attribute whenever
-           empty, toggled in JS rather than CSS, same reasoning as
-           recent-scans: an empty strip shouldn't reserve layout space. -->
-      <div class="recent-generated" id="recent-generated" hidden>
-        <div class="recent-generated__header">
-          <h2>Recently generated</h2>
-        </div>
-        <div class="recent-generated__list-wrap" id="recent-generated-list-wrap">
-          <ul class="recent-generated__list" id="recent-generated-list"></ul>
+        <!-- "Recently generated" strip (#14) — mirrors the "Last few scans"
+             strip pattern (Split 4b, #18) structurally, but is its own
+             self-contained data source: generated codes never touch scan
+             History, so this is generator.js's own small capped list,
+             persisted to localStorage directly (there's no IndexedDB store
+             to slice a "recent" view out of here — the capped list itself
+             *is* the store). Hidden via the `hidden` attribute whenever
+             empty, toggled in JS rather than CSS, same reasoning as
+             recent-scans: an empty strip shouldn't reserve layout space.
+             On desktop the list itself wraps into a grid instead of
+             staying a horizontal scroll strip (see .recent-generated__list
+             in styles.css) since there's width to spare there. -->
+        <div class="recent-generated" id="recent-generated" hidden>
+          <div class="recent-generated__header">
+            <h2>Recently generated</h2>
+          </div>
+          <div class="recent-generated__list-wrap" id="recent-generated-list-wrap">
+            <ul class="recent-generated__list" id="recent-generated-list"></ul>
+          </div>
         </div>
       </div>
     </section>
@@ -303,7 +338,12 @@
       <header class="stage__header">
         <h1>History <span class="count-pill" id="history-count">0</span></h1>
         <div class="history-controls">
-          <input class="field field--search" type="search" id="history-search" placeholder="Search history…">
+          <div class="search-field">
+            <input class="field field--search" type="search" id="history-search" placeholder="Search history…">
+            <button type="button" class="search-field__clear" id="history-search-clear" aria-label="Clear search" hidden>
+              <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
           <select class="field" id="history-filter-format" aria-label="Filter by format">
             <option value="">All formats</option>
           </select>
@@ -351,105 +391,122 @@
 
   <div class="settings-panel__body">
 
-    <section class="settings-card">
-      <h3>Appearance</h3>
-      <div class="settings-row">
-        <div>
-          <p class="settings-row__label">Dark theme</p>
-          <p class="settings-row__hint">Switch between light and dark</p>
+    <!-- ---- Preferences: four simple switches, no accordion. Each one
+         is a single row — hiding them behind a tap-to-expand header added
+         friction without hiding any real complexity, so they're grouped
+         into one always-visible block instead of three separate
+         collapsible sections (formerly Appearance / Feedback / Scanning). -->
+    <section class="settings-card settings-card--static">
+      <h3 class="settings-card__static-header">Preferences</h3>
+      <div class="settings-card__body">
+        <div class="settings-row">
+          <div>
+            <p class="settings-row__label">Dark theme</p>
+            <p class="settings-row__hint">Switch between light and dark</p>
+          </div>
+          <button class="switch" id="switch-theme" role="switch" aria-checked="false" aria-label="Dark theme"></button>
         </div>
-        <button class="switch" id="switch-theme" role="switch" aria-checked="false" aria-label="Dark theme"></button>
-      </div>
-    </section>
-
-    <section class="settings-card">
-      <h3>Feedback</h3>
-      <div class="settings-row">
-        <p class="settings-row__label">Sound on scan</p>
-        <button class="switch is-on" id="switch-sound" role="switch" aria-checked="true" aria-label="Sound on scan"></button>
-      </div>
-      <div class="settings-row">
-        <p class="settings-row__label">Vibration on scan</p>
-        <button class="switch is-on" id="switch-vibration" role="switch" aria-checked="true" aria-label="Vibration on scan"></button>
-      </div>
-    </section>
-
-    <section class="settings-card">
-      <h3>Scanning</h3>
-      <div class="settings-row">
-        <div>
-          <p class="settings-row__label">Batch mode</p>
-          <p class="settings-row__hint">Log every new unique code automatically</p>
+        <div class="settings-row">
+          <p class="settings-row__label">Sound on scan</p>
+          <button class="switch is-on" id="switch-sound" role="switch" aria-checked="true" aria-label="Sound on scan"></button>
         </div>
-        <button class="switch" id="switch-batch" role="switch" aria-checked="false" aria-label="Batch mode"></button>
-      </div>
-    </section>
-
-    <section class="settings-card">
-      <h3>History retention</h3>
-      <div class="settings-row">
-        <div>
-          <p class="settings-row__label">Auto-delete old scans</p>
-          <p class="settings-row__hint">Keep History from growing without limit</p>
+        <div class="settings-row">
+          <p class="settings-row__label">Vibration on scan</p>
+          <button class="switch is-on" id="switch-vibration" role="switch" aria-checked="true" aria-label="Vibration on scan"></button>
         </div>
-      </div>
-      <select class="field" id="settings-retention-mode" aria-label="History retention">
-        <option value="none">Keep everything</option>
-        <option value="count:500">Keep last 500 entries</option>
-        <option value="count:1000">Keep last 1,000 entries</option>
-        <option value="count:5000">Keep last 5,000 entries</option>
-        <option value="days:7">Keep last 7 days</option>
-        <option value="days:30">Keep last 30 days</option>
-        <option value="days:90">Keep last 90 days</option>
-      </select>
-    </section>
-
-    <section class="settings-card">
-      <h3>Storage</h3>
-      <div class="settings-row">
-        <div>
-          <p class="settings-row__label" id="settings-storage-count">0 entries</p>
-          <p class="settings-row__hint" id="settings-storage-size">Calculating storage usage&hellip;</p>
+        <div class="settings-row">
+          <div>
+            <p class="settings-row__label">Batch mode</p>
+            <p class="settings-row__hint">Log every new unique code automatically</p>
+          </div>
+          <button class="switch" id="switch-batch" role="switch" aria-checked="false" aria-label="Batch mode"></button>
         </div>
       </div>
     </section>
 
-    <section class="settings-card">
-      <h3>Backup</h3>
-      <p class="settings-row__hint" style="margin-bottom:10px;">
-        Save your theme, sound/vibration, batch mode, retention, and custom
-        label rules to a file, or restore them from one.
-      </p>
-      <div class="settings-row" style="gap:8px;">
-        <button class="btn btn--sm btn--ghost" id="btn-settings-export">Export settings</button>
-        <button class="btn btn--sm btn--ghost" id="btn-settings-import">Import settings</button>
+    <!-- ---- History: a single dropdown, no accordion. The header itself
+         shows the current choice (updated live by settings.js) so the
+         active setting is visible without opening anything. -->
+    <section class="settings-card settings-card--static">
+      <h3 class="settings-card__static-header" id="settings-retention-label">History retention</h3>
+      <div class="settings-card__body">
+        <p class="settings-row__hint" style="margin:0 0 8px;">Keep History from growing without limit</p>
+        <select class="field" id="settings-retention-mode" aria-label="History retention">
+          <option value="none">Keep everything</option>
+          <option value="count:500">Keep last 500 entries</option>
+          <option value="count:1000">Keep last 1,000 entries</option>
+          <option value="count:5000">Keep last 5,000 entries</option>
+          <option value="days:7">Keep last 7 days</option>
+          <option value="days:30">Keep last 30 days</option>
+          <option value="days:90">Keep last 90 days</option>
+        </select>
       </div>
-      <input type="file" id="settings-import-file" accept="application/json,.json" hidden>
     </section>
 
-    <section class="settings-card">
-      <h3>Custom label rules</h3>
-      <p class="settings-row__hint" style="margin-bottom:10px;">
-        Auto-label codes matching a pattern, e.g. <code class="mono">^SKU-\d{6}$</code>
-      </p>
-      <input class="field" id="settings-rule-name" placeholder="Label (e.g. Internal SKU)">
-      <input class="field mono" id="settings-rule-regex" placeholder="Regex, e.g. ^SKU-\d{6}$">
-      <div class="regex-sandbox">
-        <input class="field mono" id="settings-rule-test" placeholder="Test string — try it live">
-        <p class="regex-sandbox__result" id="settings-rule-test-result" aria-live="polite"></p>
+    <!-- ---- Storage: read-only stats, no accordion — nothing here is
+         adjustable, so there's nothing gained by hiding it behind a tap. -->
+    <section class="settings-card settings-card--static">
+      <h3 class="settings-card__static-header">Storage</h3>
+      <div class="settings-card__body">
+        <p class="settings-row__label" id="settings-storage-count">0 entries</p>
+        <p class="settings-row__hint" id="settings-storage-size">Calculating storage usage&hellip;</p>
       </div>
-      <button class="btn btn--sm btn--ghost" id="btn-add-rule">Add rule</button>
-      <ul class="rule-list" id="settings-rule-list"></ul>
     </section>
 
-    <section class="settings-card">
-      <h3>Keyboard shortcuts</h3>
-      <div class="kbd-list">
-        <div><span>Toggle scanning</span><kbd>Space</kbd></div>
-        <div><span>Copy last result</span><kbd>C</kbd></div>
-        <div><span>Export last result</span><kbd>E</kbd></div>
+    <!-- ---- Data: export/import actions, no accordion — these are things
+         you do, not values you configure, so they read better as a plain
+         visible block than as a collapsed "setting". -->
+    <section class="settings-card settings-card--static">
+      <h3 class="settings-card__static-header">Data</h3>
+      <div class="settings-card__body">
+        <p class="settings-row__hint" style="margin-bottom:10px;">
+          Save your theme, sound/vibration, batch mode, retention, and custom
+          label rules to a file, or restore them from one.
+        </p>
+        <div class="settings-row" style="gap:8px;">
+          <button class="btn btn--sm btn--ghost" id="btn-settings-export">Export settings</button>
+          <button class="btn btn--sm btn--ghost" id="btn-settings-import">Import settings</button>
+        </div>
+        <input type="file" id="settings-import-file" accept="application/json,.json" hidden>
       </div>
     </section>
+
+    <!-- ---- Custom label rules: the one section still worth collapsing —
+         a multi-field form (name, regex, live test sandbox) plus a growing
+         saved-rule list, genuinely more content than a glance needs. -->
+    <section class="settings-card is-collapsed">
+      <button class="settings-card__toggle" type="button" aria-expanded="false" aria-controls="card-body-rules">
+        <h3>Custom label rules</h3>
+        <span class="settings-card__toggle-icon"><svg class="settings-card__chevron" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+      </button>
+      <div class="settings-card__body" id="card-body-rules" hidden>
+        <p class="settings-row__hint" style="margin-bottom:10px;">
+          Auto-label codes matching a pattern, e.g. <code class="mono">^SKU-\d{6}$</code>
+        </p>
+        <input class="field" id="settings-rule-name" placeholder="Label (e.g. Internal SKU)">
+        <input class="field mono" id="settings-rule-regex" placeholder="Regex, e.g. ^SKU-\d{6}$">
+        <div class="regex-sandbox">
+          <input class="field mono" id="settings-rule-test" placeholder="Test string — try it live">
+          <p class="regex-sandbox__result" id="settings-rule-test-result" aria-live="polite"></p>
+        </div>
+        <button class="btn btn--sm btn--ghost" id="btn-add-rule">Add rule</button>
+        <ul class="rule-list" id="settings-rule-list"></ul>
+      </div>
+    </section>
+
+    <!-- ---- Keyboard shortcuts: static reference list, no accordion —
+         already gated to desktop-only, no need to further hide it. -->
+    <section class="settings-card settings-card--static settings-card--desktop-only">
+      <h3 class="settings-card__static-header">Keyboard shortcuts</h3>
+      <div class="settings-card__body">
+        <div class="kbd-list">
+          <div><span>Toggle scanning</span><kbd>Space</kbd></div>
+          <div><span>Copy last result</span><kbd>C</kbd></div>
+          <div><span>Export last result</span><kbd>E</kbd></div>
+        </div>
+      </div>
+    </section>
+
 
   </div>
 </aside>
