@@ -377,6 +377,19 @@
     </section>
 
     <section class="settings-card">
+      <h3>Backup</h3>
+      <p class="settings-row__hint" style="margin-bottom:10px;">
+        Save your theme, sound/vibration, batch mode, retention, and custom
+        label rules to a file, or restore them from one.
+      </p>
+      <div class="settings-row" style="gap:8px;">
+        <button class="btn btn--sm btn--ghost" id="btn-settings-export">Export settings</button>
+        <button class="btn btn--sm btn--ghost" id="btn-settings-import">Import settings</button>
+      </div>
+      <input type="file" id="settings-import-file" accept="application/json,.json" hidden>
+    </section>
+
+    <section class="settings-card">
       <h3>Custom label rules</h3>
       <p class="settings-row__hint" style="margin-bottom:10px;">
         Auto-label codes matching a pattern, e.g. <code class="mono">^SKU-\d{6}$</code>

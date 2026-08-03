@@ -49,7 +49,11 @@
     selectRetention: document.getElementById('settings-retention-mode'),
 
     storageCount: document.getElementById('settings-storage-count'),
-    storageSize: document.getElementById('settings-storage-size')
+    storageSize: document.getElementById('settings-storage-size'),
+
+    btnExportSettings: document.getElementById('btn-settings-export'),
+    btnImportSettings: document.getElementById('btn-settings-import'),
+    importSettingsFile: document.getElementById('settings-import-file')
   };
 
   var RULES_STORAGE_KEY = 'scannerapp_custom_rules';
@@ -261,6 +265,202 @@
   // UI (recent-scans strip, History page itself) already stays in sync via
   // this same event rather than polling.
   window.addEventListener('scannerapp:historychange', updateStorageIndicator);
+
+  // ---- #15: settings export/import as JSON -----------------------------------
+  // Everything this app persists is localStorage-only (rules, theme, sound,
+  // vibration, batchMode, retention) — this section serializes all of it to
+  // one settings.json a person can back up or move to another device, and
+  // restores it back. Deliberately all-or-nothing on the *file-shape* level:
+  // if the file doesn't look like one of this app's own exports, nothing is
+  // touched at all (existing settings are never partially overwritten).
+  // Individual bad rules *within* an otherwise-valid export (e.g. a regex
+  // that no longer compiles) are skipped rather than failing the whole
+  // import, since that's a data-quality issue, not a corrupt-file one, and
+  // the person is told how many were skipped either way.
+  var SETTINGS_EXPORT_APP = 'scannerapp';
+  var SETTINGS_EXPORT_TYPE = 'settings';
+  var SETTINGS_EXPORT_VERSION = 1;
+
+  // Mirrors history.js's own download() helper (Blob + object-URL + a
+  // throwaway <a download>) rather than importing it — history.js doesn't
+  // expose it on its public App.history surface, and per each file's
+  // ownership header this file shouldn't reach into another's internals.
+  function downloadSettingsFile(filename, content) {
+    var blob = new Blob([content], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function buildSettingsExportObject() {
+    var s = App.state.settings;
+    // Reads the retention <select>'s raw string value rather than
+    // re-deriving it from s.retention (an already-parsed {mode,value}
+    // object) — the string is the one source of truth persistRetention()
+    // saves, so round-tripping through it avoids a second serialization
+    // format to keep in sync.
+    var retentionStr = els.selectRetention ? els.selectRetention.value : RETENTION_DEFAULT;
+    return {
+      _app: SETTINGS_EXPORT_APP,
+      _export: SETTINGS_EXPORT_TYPE,
+      _version: SETTINGS_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: {
+        theme: s.theme === 'dark' ? 'dark' : 'light',
+        sound: !!s.sound,
+        vibration: !!s.vibration,
+        batchMode: !!s.batchMode,
+        retention: retentionStr,
+        rules: (s.rules || []).map(function (r) {
+          return { id: r.id, label: r.label, pattern: r.pattern };
+        })
+      }
+    };
+  }
+
+  function exportSettings() {
+    var obj = buildSettingsExportObject();
+    var filename = 'scannerapp-settings-' + new Date().toISOString().slice(0, 10) + '.json';
+    downloadSettingsFile(filename, JSON.stringify(obj, null, 2));
+    App.ui.toast('Exported ' + filename);
+  }
+
+  function isValidRetentionString(str) {
+    return typeof str === 'string' && (str === 'none' || /^(count|days):[1-9]\d*$/.test(str));
+  }
+
+  // Validates + normalizes an imported object in one pass. Returns
+  // { ok: true, data, skippedCount } or { ok: false, error }. Never mutates
+  // App.state or localStorage itself — applyImportedSettings() is the only
+  // place that happens, and only once validation has fully succeeded.
+  function validateSettingsImport(parsed) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, error: 'That file doesn\u2019t look like a settings export (not a JSON object).' };
+    }
+    if (parsed._app !== SETTINGS_EXPORT_APP || parsed._export !== SETTINGS_EXPORT_TYPE) {
+      return { ok: false, error: 'That file doesn\u2019t look like a Scanner App settings export.' };
+    }
+    var s = parsed.settings;
+    if (!s || typeof s !== 'object' || Array.isArray(s)) {
+      return { ok: false, error: 'Settings export is missing its settings data.' };
+    }
+    if (s.theme !== 'light' && s.theme !== 'dark') {
+      return { ok: false, error: 'Import file has an invalid theme value.' };
+    }
+    if (typeof s.sound !== 'boolean' || typeof s.vibration !== 'boolean' || typeof s.batchMode !== 'boolean') {
+      return { ok: false, error: 'Import file has invalid preference values.' };
+    }
+    if (!isValidRetentionString(s.retention)) {
+      return { ok: false, error: 'Import file has an invalid retention value.' };
+    }
+    if (!Array.isArray(s.rules)) {
+      return { ok: false, error: 'Import file has an invalid rules list.' };
+    }
+
+    var cleanRules = [];
+    var skippedCount = 0;
+    for (var i = 0; i < s.rules.length; i++) {
+      var r = s.rules[i];
+      var label = r && typeof r.label === 'string' ? r.label.trim() : '';
+      var pattern = r && typeof r.pattern === 'string' ? r.pattern.trim() : '';
+      if (!label || !pattern) { skippedCount++; continue; }
+      try {
+        new RegExp(pattern); // eslint-disable-line no-new
+      } catch (err) {
+        skippedCount++;
+        continue;
+      }
+      cleanRules.push({
+        id: (typeof r.id === 'string' && r.id) ? r.id : ('rule_' + Date.now() + '_' + Math.floor(Math.random() * 1000) + '_' + i),
+        label: label,
+        pattern: pattern
+      });
+    }
+
+    return {
+      ok: true,
+      skippedCount: skippedCount,
+      data: {
+        theme: s.theme,
+        sound: s.sound,
+        vibration: s.vibration,
+        batchMode: s.batchMode,
+        retention: s.retention,
+        rules: cleanRules
+      }
+    };
+  }
+
+  // Applies an already-validated import payload and resyncs every piece of
+  // UI that mirrors these values — same set of updates toggle()/the
+  // retention-select handler/renderRuleList() each do individually, just
+  // all at once here since import touches all of them together.
+  function applyImportedSettings(data) {
+    var s = App.state.settings;
+    s.theme = data.theme;
+    s.sound = data.sound;
+    s.vibration = data.vibration;
+    s.batchMode = data.batchMode;
+    s.retention = parseRetentionValue(data.retention);
+    s.rules = data.rules;
+
+    try { window.localStorage.setItem(THEME_STORAGE_KEY, s.theme); } catch (err) { /* storage unavailable */ }
+    try { window.localStorage.setItem(SOUND_STORAGE_KEY, s.sound ? '1' : '0'); } catch (err) { /* storage unavailable */ }
+    try { window.localStorage.setItem(VIBRATION_STORAGE_KEY, s.vibration ? '1' : '0'); } catch (err) { /* storage unavailable */ }
+    try { window.localStorage.setItem(BATCH_MODE_STORAGE_KEY, s.batchMode ? '1' : '0'); } catch (err) { /* storage unavailable */ }
+    persistRetention(data.retention);
+    persistRules();
+
+    applyTheme();
+    setSwitchVisual(els.switchSound, s.sound);
+    setSwitchVisual(els.switchVibration, s.vibration);
+    syncBatchModeUI();
+    if (els.selectRetention) els.selectRetention.value = data.retention;
+    renderRuleList();
+    updateRegexSandbox();
+  }
+
+  function importSettingsFromFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onerror = function () {
+      App.ui.toast('Couldn\u2019t read that file.', 'danger');
+    };
+    reader.onload = function () {
+      var parsed;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch (err) {
+        App.ui.toast('That file isn\u2019t valid JSON \u2014 import cancelled, nothing changed.', 'danger');
+        return;
+      }
+      var result = validateSettingsImport(parsed);
+      if (!result.ok) {
+        App.ui.toast(result.error + ' Import cancelled, nothing changed.', 'danger');
+        return;
+      }
+      applyImportedSettings(result.data);
+      App.ui.toast(result.skippedCount > 0
+        ? ('Settings imported (skipped ' + result.skippedCount + ' invalid rule' + (result.skippedCount === 1 ? '' : 's') + ').')
+        : 'Settings imported.');
+    };
+    reader.readAsText(file);
+  }
+
+  if (els.btnExportSettings) els.btnExportSettings.addEventListener('click', exportSettings);
+  if (els.btnImportSettings && els.importSettingsFile) {
+    els.btnImportSettings.addEventListener('click', function () { els.importSettingsFile.click(); });
+    els.importSettingsFile.addEventListener('change', function () {
+      var file = els.importSettingsFile.files && els.importSettingsFile.files[0];
+      importSettingsFromFile(file);
+      els.importSettingsFile.value = ''; // reset so re-importing the same filename fires 'change' again
+    });
+  }
 
   // ---- custom regex prefix rules ---------------------------------------------
   function persistRules() {

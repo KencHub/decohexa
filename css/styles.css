@@ -757,7 +757,11 @@ button { font-family: inherit; }
   display: flex; align-items: center; gap: 14px;
   text-align: left; padding-right: 10px;
 }
-.toast__text { white-space: nowrap; }
+/* nowrap only applies to action toasts (message sits inline next to a
+   button, e.g. "History cleared — Undo") — plain toasts must wrap normally
+   or long messages overflow past the pill's max-width off the edge of the
+   screen instead of wrapping onto a second line. */
+.toast--action .toast__text { white-space: nowrap; }
 .toast__action {
   background: none; border: none; padding: 4px 2px;
   font: inherit; font-weight: 700; color: inherit;
