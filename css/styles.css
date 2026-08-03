@@ -85,7 +85,21 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  transition: background .25s ease, color .25s ease;
+  transition: background-color .2s ease, color .2s ease;
+}
+/* Theme-crossfade consistency (see settings.js applyTheme()). Previously
+   only <body> and a handful of hover/press states declared a background
+   transition at all — <html> and every other themed surface (cards, the
+   settings panel, inputs, the custom-select dropdown, badges…) snapped to
+   the new color instantly. That mismatch — body still mid-fade while
+   everything else had already jumped — is what read as a "flash" on theme
+   toggle. This is a low-specificity fallback: any selector further down
+   this file that already declares its own `transition` (e.g. hover-state
+   background transitions) keeps winning for the elements it targets, so
+   this only fills in the gap for elements that had no transition at all.
+   Every surface now animates on the same .2s clock as <body> above. */
+*, *::before, *::after {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
 }
 h1, h2, h3 { font-family: var(--font-display); margin: 0; color: var(--ink); }
 button { font-family: inherit; }
@@ -116,7 +130,15 @@ button { font-family: inherit; }
   gap: 4px;
   position: sticky;
   top: 0;
+  /* 100vh is the viewport at first paint and doesn't track a mobile
+     browser's collapsing/expanding address bar — it just leaves a gap or
+     clips. 100dvh does track it. Declared second (not as a single
+     fallback-less line) so browsers that don't understand `dvh` simply
+     ignore that line and silently keep the 100vh above; ones that do
+     understand it use the more accurate value, per normal CSS unknown-value
+     handling — no @supports needed. */
   height: 100vh;
+  height: 100dvh;
 }
 .rail__brand {
   width: 40px; height: 40px;
@@ -825,6 +847,10 @@ button { font-family: inherit; }
   position: fixed; inset: 0; background: rgba(20,24,28,.4);
   opacity: 0; pointer-events: none; transition: opacity .2s ease;
   z-index: 40;
+  /* Second line of defense behind the JS scroll lock in ui.js: if a touch
+     ever does land on the scrim while it has no scrollable content of its
+     own, this stops that gesture from being handed off to <body>. */
+  overscroll-behavior: contain;
 }
 .scrim.is-open { opacity: 1; pointer-events: auto; }
 
@@ -841,7 +867,14 @@ button { font-family: inherit; }
 .settings-panel.is-open { transform: translateX(0); }
 .settings-panel__header { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .settings-panel__header h2 { font-size: 17px; font-weight: 600; }
-.settings-panel__body { overflow-y: auto; padding: 8px 22px 30px; flex: 1; }
+.settings-panel__body {
+  overflow-y: auto; padding: 8px 22px 30px; flex: 1;
+  -webkit-overflow-scrolling: touch;
+  /* Stops scroll momentum chaining through to <body> once this list hits
+     its own top/bottom boundary — without it, dragging past the end of the
+     settings list rubber-bands the real page behind the drawer. */
+  overscroll-behavior: contain;
+}
 
 .settings-card { padding: 4px 0; border-bottom: 1px solid var(--border); }
 .settings-card:last-child { border-bottom: none; }
@@ -1012,6 +1045,7 @@ button { font-family: inherit; }
 .confirm-scrim {
   position: fixed; inset: 0; background: rgba(20,24,28,.45);
   opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 70;
+  overscroll-behavior: contain;
 }
 .confirm-scrim.is-open { opacity: 1; pointer-events: auto; }
 .confirm-modal {
@@ -1092,6 +1126,13 @@ button { font-family: inherit; }
   #view-history .stage__header h1 { flex: 1 1 100%; }
   #view-history .stage__header .history-controls { flex: 1 1 100%; }
   #view-history .search-field { flex: 1 1 auto; min-width: 0; }
+
+  /* iOS Safari auto-zooms the whole page on focus for any text input under
+     16px. At the base 13.5px, tapping History's search field or any of the
+     Settings > Custom label rules fields (label/regex/test string) forced
+     that zoom, then left the user to manually pinch back out. Scoped to
+     mobile only, so desktop keeps the existing compact 13.5px sizing. */
+  .field, .field--textarea { font-size: 16px; }
 }
 
 @media (max-width: 400px) {

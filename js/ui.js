@@ -25,6 +25,50 @@
   var App = window.ScannerApp;
   App.ui = App.ui || {};
 
+  // ---- body scroll lock (shared by any fixed-position overlay: the
+  // Settings drawer, the confirm modal) ---------------------------------------
+  // The page behind those overlays is never actually a static background —
+  // it's still the live, scrollable <body>. A fixed-position scrim has no
+  // scrollable content of its own, so a touch-drag that starts on it (or on
+  // the sliver of page still visible past a partial-width drawer) falls
+  // through to the nearest real scroll container, which is <body>, and the
+  // app visibly scrolls/rubber-bands behind the overlay. Freezing <body> in
+  // place for the duration of the overlay (rather than trusting the
+  // overlay's own position:fixed to be enough) removes that scrollable
+  // ancestor entirely. Ref-counted so one overlay opened from within another
+  // (e.g. a confirm dialog opened while Settings is open) doesn't let the
+  // inner one's close accidentally unlock the page while the outer is still
+  // showing.
+  var scrollLockCount = 0;
+  var savedScrollY = 0;
+  function lockScroll() {
+    if (scrollLockCount === 0) {
+      savedScrollY = window.scrollY || window.pageYOffset || 0;
+      document.body.style.position = 'fixed';
+      document.body.style.top = (-savedScrollY) + 'px';
+      document.body.style.left = '0';
+      document.body.style.right = '0';
+      document.body.style.width = '100%';
+    }
+    scrollLockCount++;
+  }
+  function unlockScroll() {
+    if (scrollLockCount === 0) return;
+    scrollLockCount--;
+    if (scrollLockCount === 0) {
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.body.style.width = '';
+      // restore instantly (no smooth-scroll) — the user never sees this,
+      // since the overlay closing at the same time covers the jump
+      window.scrollTo(0, savedScrollY);
+    }
+  }
+  App.ui.lockScroll = lockScroll;
+  App.ui.unlockScroll = unlockScroll;
+
   // ---- view switching (scan / generate / history) --------------------------
   var navButtons = Array.prototype.slice.call(document.querySelectorAll('.rail__item[data-view]'));
   var views = Array.prototype.slice.call(document.querySelectorAll('.view[data-view-panel]'));
@@ -129,6 +173,7 @@
   var confirmOk = document.getElementById('confirm-modal-ok');
   var confirmCancel = document.getElementById('confirm-modal-cancel');
   var pendingResolve = null;
+  var confirmLastFocused = null;
 
   // danger defaults to true so existing call sites (Clear history, Delete
   // selected) keep rendering a red Confirm button with no change — pass
@@ -136,17 +181,21 @@
   // button as .btn--primary instead.
   function openConfirm(message, danger) {
     if (danger === undefined) danger = true;
+    confirmLastFocused = document.activeElement;
     confirmMessage.textContent = message;
     confirmOk.classList.remove('btn--danger', 'btn--primary');
     confirmOk.classList.add(danger ? 'btn--danger' : 'btn--primary');
     confirmScrim.classList.add('is-open');
     confirmModal.classList.add('is-open');
     confirmOk.focus();
+    lockScroll();
     return new Promise(function (resolve) { pendingResolve = resolve; });
   }
   function closeConfirm(result) {
     confirmScrim.classList.remove('is-open');
     confirmModal.classList.remove('is-open');
+    unlockScroll();
+    if (confirmLastFocused && typeof confirmLastFocused.focus === 'function') confirmLastFocused.focus();
     if (pendingResolve) { pendingResolve(result); pendingResolve = null; }
   }
   confirmOk.addEventListener('click', function () { closeConfirm(true); });

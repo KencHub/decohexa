@@ -21,6 +21,14 @@
       if (window.localStorage.getItem('scannerapp_theme') === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         document.body.setAttribute('data-theme', 'dark');
+        // Mirrors dark mode's --surface value from styles.css. Hardcoded
+        // (rather than read via getComputedStyle) because this runs before
+        // the stylesheet is guaranteed to have applied — settings.js's own
+        // applyTheme() takes over from here on every later toggle and reads
+        // the live custom property instead, so this one literal is the only
+        // place that needs to stay in sync with styles.css by hand.
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', '#1B2024');
       }
     } catch (err) { /* storage unavailable — default light stands */ }
   })();

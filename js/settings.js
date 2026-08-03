@@ -67,20 +67,69 @@
   var RETENTION_STORAGE_KEY = 'scannerapp_retention';
 
   // ---- panel open/close -----------------------------------------------------
+  // lastFocusedEl / focus trap: the page behind the drawer is frozen (see
+  // lockScroll below) but was still tab-reachable before this, so a
+  // keyboard/screen-reader user could Tab straight past the drawer into
+  // frozen content they can't see move. Trapping focus inside the drawer
+  // while it's open, and returning it to whatever opened the drawer on
+  // close, keeps keyboard navigation matching what's actually visible.
+  var lastFocusedEl = null;
+
+  function getFocusableInDrawer() {
+    var nodes = els.drawer.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.prototype.filter.call(nodes, function (el) {
+      return !el.disabled && el.offsetParent !== null;
+    });
+  }
+
   function openPanel() {
+    lastFocusedEl = document.activeElement;
     els.drawer.classList.add('is-open');
     els.scrim.classList.add('is-open');
     updateStorageIndicator();
+    // Freezes the real page behind the drawer — without this, scrolling
+    // inside the drawer (or a touch starting on the scrim / the sliver of
+    // page still visible past the drawer's edge) falls through to <body>
+    // and the app visibly scrolls behind the panel. See ui.js for details.
+    if (App.ui && App.ui.lockScroll) App.ui.lockScroll();
+    // Deferred a tick so focus moves after the drawer's own open transition
+    // starts, rather than fighting whatever currently has focus (e.g. the
+    // settings rail button mid-click).
+    window.setTimeout(function () {
+      if (els.btnSettingsClose) els.btnSettingsClose.focus();
+    }, 0);
   }
   function closePanel() {
     els.drawer.classList.remove('is-open');
     els.scrim.classList.remove('is-open');
+    if (App.ui && App.ui.unlockScroll) App.ui.unlockScroll();
+    if (lastFocusedEl && typeof lastFocusedEl.focus === 'function') lastFocusedEl.focus();
+    lastFocusedEl = null;
   }
   if (els.btnSettings) els.btnSettings.addEventListener('click', openPanel);
   if (els.btnSettingsClose) els.btnSettingsClose.addEventListener('click', closePanel);
   if (els.scrim) els.scrim.addEventListener('click', closePanel);
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && els.drawer.classList.contains('is-open')) closePanel();
+    if (!els.drawer.classList.contains('is-open')) return;
+    if (e.key === 'Escape') {
+      closePanel();
+      return;
+    }
+    if (e.key === 'Tab') {
+      var focusable = getFocusableInDrawer();
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   });
 
   // ---- generic switch visual sync --------------------------------------------
@@ -104,11 +153,24 @@
     try { window.localStorage.setItem(BATCH_MODE_STORAGE_KEY, on ? '1' : '0'); } catch (err) { /* storage unavailable */ }
   }
 
+  var metaThemeColor = document.querySelector('meta[name="theme-color"]');
+
   function applyTheme() {
     var isDark = App.state.settings.theme === 'dark';
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
     setSwitchVisual(els.switchTheme, isDark);
+    // Keeps the mobile browser's own address-bar/status-bar color in step
+    // with the theme — previously this tag was set once in index.html and
+    // never touched again, so it stayed the light-mode color even after
+    // switching to dark, leaving a permanent seam at the top of the screen.
+    // Reads the live --surface custom property rather than hardcoding
+    // '#FFFFFF' / '#1B2024' here, so this can't drift out of sync with the
+    // actual color values defined in styles.css.
+    if (metaThemeColor) {
+      var surfaceColor = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+      if (surfaceColor) metaThemeColor.setAttribute('content', surfaceColor);
+    }
   }
 
   // ---- toggle(key): the one documented public mutator ------------------------
