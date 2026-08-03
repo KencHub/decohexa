@@ -633,6 +633,54 @@ button { font-family: inherit; }
 .generate-preview__canvas-wrap canvas { display: block; image-rendering: pixelated; }
 .generate-preview__hint { font-size: 12.5px; color: var(--ink-faint); margin: 14px 0; }
 
+/* ---- batch generate (#13) ---- */
+.batch-generate {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0 18px;
+  background: var(--surface);
+}
+.batch-generate summary {
+  cursor: pointer;
+  padding: 14px 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.batch-generate summary::-webkit-details-marker { display: none; }
+.batch-generate summary::before {
+  content: '▸';
+  font-size: 11px;
+  color: var(--ink-faint);
+  transition: transform .15s ease;
+}
+.batch-generate[open] summary::before { transform: rotate(90deg); }
+.batch-generate__body { padding: 2px 0 18px; }
+.batch-generate__hint { font-size: 12.5px; color: var(--ink-faint); margin: 12px 0 0; }
+.batch-generate__results {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.batch-generate__result-item {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+.batch-generate__result-item.is-failed { color: var(--danger); }
+.batch-generate__result-item.is-skipped { color: var(--ink-faint); }
+
 /* ==========================================================================
    History view
    ========================================================================== */

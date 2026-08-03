@@ -259,6 +259,26 @@
         </div>
       </div>
 
+      <!-- Batch generate → zip (#13). A <details> disclosure (matches the
+           "Raw text" pattern already used on the Scan page's capture card)
+           rather than a mode toggle on the form above, since batch input is
+           genuinely separate scratch input from the single-code textarea,
+           not an alternate view of the same field — both can be used
+           independently without one clobbering the other's state. Shares
+           the format dropdown / base64 switch above rather than duplicating
+           them, since a batch run is one format applied to many lines. -->
+      <details class="batch-generate" id="batch-generate">
+        <summary>Batch generate (multiple codes → zip)</summary>
+        <div class="batch-generate__body">
+          <label class="field-label" for="generator-batch-text">One code per line</label>
+          <textarea class="field field--textarea" id="generator-batch-text" placeholder="One line per code&#10;Uses the barcode format selected above"></textarea>
+          <p class="field-hint">Blank lines are skipped. Each line becomes one PNG in the downloaded zip.</p>
+          <button class="btn btn--primary" id="btn-generate-batch">Generate zip</button>
+          <p class="batch-generate__hint" id="generator-batch-hint"></p>
+          <ul class="batch-generate__results" id="generator-batch-results" hidden></ul>
+        </div>
+      </details>
+
       <!-- "Recently generated" strip (#14) — mirrors the "Last few scans"
            strip pattern (Split 4b, #18) structurally, but is its own
            self-contained data source: generated codes never touch scan
