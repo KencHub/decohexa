@@ -32,7 +32,10 @@
     btnGenerate: document.getElementById('btn-generate'),
     canvas: document.getElementById('generator-canvas'),
     hint: document.getElementById('generator-hint'),
-    btnDownload: document.getElementById('btn-generator-download')
+    btnDownload: document.getElementById('btn-generator-download'),
+    recentGeneratedWrap: document.getElementById('recent-generated'),
+    recentGeneratedListWrap: document.getElementById('recent-generated-list-wrap'),
+    recentGeneratedList: document.getElementById('recent-generated-list')
   };
 
   // Whether the "Encode as base64" toggle is on. Deliberately not persisted
@@ -268,6 +271,147 @@
       });
   }
 
+  // ---- #14: recently-generated codes strip -----------------------------------
+  // Own small capped store (not a slice of a bigger dataset the way
+  // History's getRecent() is) — persisted directly to localStorage since
+  // there's no IndexedDB store backing generated codes. Re-generates the
+  // barcode image on demand rather than storing PNG data URLs, which would
+  // be a much heavier localStorage footprint for no real benefit — the
+  // encoder is fast and deterministic for the same input.
+  var RECENT_GENERATED_STORAGE_KEY = 'scannerapp_recent_generated';
+  var RECENT_GENERATED_COUNT = 8;
+
+  function loadRecentGenerated() {
+    var raw = null;
+    try { raw = window.localStorage.getItem(RECENT_GENERATED_STORAGE_KEY); } catch (err) { /* storage unavailable */ }
+    if (!raw) return [];
+    try {
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(function (e) {
+        return e && typeof e.text === 'string' && e.text &&
+          typeof e.format === 'string' &&
+          GENERATE_FORMATS.some(function (fmt) { return fmt.value === e.format; });
+      }).slice(0, RECENT_GENERATED_COUNT);
+    } catch (err) {
+      return []; // malformed localStorage value — start fresh rather than throw
+    }
+  }
+
+  var recentGenerated = loadRecentGenerated();
+
+  function persistRecentGenerated() {
+    try { window.localStorage.setItem(RECENT_GENERATED_STORAGE_KEY, JSON.stringify(recentGenerated)); } catch (err) { /* storage unavailable */ }
+  }
+
+  function updateGeneratedScrollFadeState() {
+    if (!els.recentGeneratedListWrap || !els.recentGeneratedList) return;
+    var list = els.recentGeneratedList;
+    var atStart = list.scrollLeft <= 0;
+    var atEnd = list.scrollLeft + list.clientWidth >= list.scrollWidth - 1;
+    els.recentGeneratedListWrap.classList.toggle('has-overflow-left', !atStart);
+    els.recentGeneratedListWrap.classList.toggle('has-overflow-right', !atEnd);
+  }
+  if (els.recentGeneratedList) {
+    els.recentGeneratedList.addEventListener('scroll', updateGeneratedScrollFadeState, { passive: true });
+  }
+  window.addEventListener('resize', updateGeneratedScrollFadeState);
+  if (window.ResizeObserver && els.recentGeneratedList) {
+    new ResizeObserver(updateGeneratedScrollFadeState).observe(els.recentGeneratedList);
+  }
+
+  function renderRecentGenerated() {
+    if (!els.recentGeneratedWrap || !els.recentGeneratedList) return;
+    els.recentGeneratedWrap.hidden = recentGenerated.length === 0;
+    els.recentGeneratedList.innerHTML = '';
+    if (!recentGenerated.length) {
+      if (els.recentGeneratedListWrap) {
+        els.recentGeneratedListWrap.classList.remove('has-overflow-left', 'has-overflow-right');
+      }
+      return;
+    }
+
+    recentGenerated.forEach(function (entry) {
+      var li = document.createElement('li');
+      li.className = 'recent-generated__item';
+      li.setAttribute('role', 'button');
+      li.setAttribute('tabindex', '0');
+      li.setAttribute('aria-label', entry.format + ': ' + entry.text);
+
+      var format = document.createElement('span');
+      format.className = 'recent-generated__format';
+      format.textContent = entry.format + (entry.base64 ? ' \u00b7 base64' : '');
+
+      var preview = document.createElement('span');
+      preview.className = 'recent-generated__preview';
+      preview.textContent = entry.text;
+
+      li.appendChild(format);
+      li.appendChild(preview);
+
+      li.addEventListener('click', function () { openRecentGenerated(entry); });
+      li.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          openRecentGenerated(entry);
+        }
+      });
+
+      els.recentGeneratedList.appendChild(li);
+    });
+
+    updateGeneratedScrollFadeState();
+  }
+
+  // De-dupes by exact (text, format, base64) match anywhere in the list —
+  // re-generating or re-opening the same code bumps it to the top instead
+  // of creating a second chip for it.
+  function pushRecentGenerated(text, format, base64) {
+    var existingIndex = -1;
+    for (var i = 0; i < recentGenerated.length; i++) {
+      var e = recentGenerated[i];
+      if (e.text === text && e.format === format && !!e.base64 === !!base64) { existingIndex = i; break; }
+    }
+    if (existingIndex !== -1) recentGenerated.splice(existingIndex, 1);
+
+    recentGenerated.unshift({
+      id: 'gen_' + Date.now() + '_' + Math.floor(Math.random() * 100000),
+      text: text,
+      format: format,
+      base64: !!base64,
+      timestamp: Date.now()
+    });
+    if (recentGenerated.length > RECENT_GENERATED_COUNT) recentGenerated.length = RECENT_GENERATED_COUNT;
+
+    persistRecentGenerated();
+    renderRecentGenerated();
+  }
+
+  // Re-opening a chip fills the form *and* immediately re-renders +
+  // reveals Download — deliberately different from prefill() (used for
+  // the Scan-page "Regenerate" round-trip), which intentionally leaves
+  // rendering to the person so they can tweak the text first. Here the
+  // whole point is "re-download exactly what I already made," so getting
+  // straight to a downloadable image with one tap is the more useful
+  // default.
+  function openRecentGenerated(entry) {
+    if (els.format) {
+      els.format.value = entry.format;
+      try { window.localStorage.setItem(FORMAT_STORAGE_KEY, entry.format); } catch (err) { /* storage unavailable */ }
+    }
+    base64Enabled = !!entry.base64;
+    setBase64SwitchVisual(base64Enabled);
+    updateFormatHint();
+    updateBase64Availability(); // may turn base64Enabled back off if this format can't hold it
+
+    els.text.value = entry.text;
+    updateDecodePreview();
+    els.text.focus();
+    if (els.text.scrollIntoView) els.text.scrollIntoView({ block: 'nearest' });
+
+    handleGenerateClick();
+  }
+
   // ---- UI wiring --------------------------------------------------------------
   var GENERATE_ERROR_COPY = {
     'empty-input': 'Type something to encode first.',
@@ -288,6 +432,7 @@
         canvasFormat = format;
         els.hint.textContent = 'Generated ' + new Date().toLocaleTimeString() + '.';
         els.btnDownload.hidden = false;
+        pushRecentGenerated(els.text.value.trim(), format, base64Enabled);
       })
       .catch(function (err) {
         if (token !== generationToken) return;
@@ -342,6 +487,7 @@
   // so the preview starts blank.
   updateBase64Availability();
   updateDecodePreview();
+  renderRecentGenerated();
 
   /**
    * Pre-fill the Generate form from an existing scan (Scan's live result or

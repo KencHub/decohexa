@@ -515,6 +515,61 @@ button { font-family: inherit; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* ---- recent-generated strip (Split 5b, #14) ----
+   Structurally identical chip-strip to .recent-scans above (horizontal
+   scroll, edge-fade cue, same sizing) — kept as its own class namespace
+   rather than reusing .recent-scans directly since it's a distinct
+   feature on a different page (Generate, not Scan) with its own JS-owned
+   state (generator.js's localStorage-backed list, not App.history). */
+.recent-generated {
+  margin-top: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px 16px;
+}
+.recent-generated__header { margin-bottom: 10px; }
+.recent-generated__header h2 {
+  margin: 0; font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint);
+}
+.recent-generated__list-wrap { position: relative; }
+.recent-generated__list-wrap::before,
+.recent-generated__list-wrap::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 28px;
+  pointer-events: none; z-index: 1; opacity: 0; transition: opacity .15s ease;
+}
+.recent-generated__list-wrap::before { left: 0; background: linear-gradient(to right, var(--surface), transparent); }
+.recent-generated__list-wrap::after { right: 0; background: linear-gradient(to left, var(--surface), transparent); }
+.recent-generated__list-wrap.has-overflow-left::before { opacity: 1; }
+.recent-generated__list-wrap.has-overflow-right::after { opacity: 1; }
+
+.recent-generated__list {
+  display: flex; gap: 10px; margin: 0; padding: 0 2px 2px; list-style: none;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+.recent-generated__item {
+  flex: 0 0 auto; min-width: 132px; max-width: 200px;
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 9px 12px;
+  cursor: pointer; transition: background .12s ease, border-color .12s ease;
+  scroll-snap-align: start;
+}
+.recent-generated__item:hover,
+.recent-generated__item:focus-visible {
+  background: var(--brand-soft); border-color: var(--brand); outline: none;
+}
+.recent-generated__format {
+  font-size: 10.5px; font-weight: 700; color: var(--brand);
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.recent-generated__preview {
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* ---- capture panel (result) ---- */
 .capture-panel {
   background: var(--surface);
@@ -868,4 +923,5 @@ button { font-family: inherit; }
   .history-controls { flex-wrap: wrap; }
   .field--search { width: 100%; }
   .recent-scans__item { min-width: 112px; padding: 8px 10px; }
+  .recent-generated__item { min-width: 112px; padding: 8px 10px; }
 }

@@ -258,6 +258,24 @@
           <button class="btn btn--ghost" id="btn-generator-download" hidden>Download PNG</button>
         </div>
       </div>
+
+      <!-- "Recently generated" strip (#14) — mirrors the "Last few scans"
+           strip pattern (Split 4b, #18) structurally, but is its own
+           self-contained data source: generated codes never touch scan
+           History, so this is generator.js's own small capped list,
+           persisted to localStorage directly (there's no IndexedDB store
+           to slice a "recent" view out of here — the capped list itself
+           *is* the store). Hidden via the `hidden` attribute whenever
+           empty, toggled in JS rather than CSS, same reasoning as
+           recent-scans: an empty strip shouldn't reserve layout space. -->
+      <div class="recent-generated" id="recent-generated" hidden>
+        <div class="recent-generated__header">
+          <h2>Recently generated</h2>
+        </div>
+        <div class="recent-generated__list-wrap" id="recent-generated-list-wrap">
+          <ul class="recent-generated__list" id="recent-generated-list"></ul>
+        </div>
+      </div>
     </section>
 
     <!-- ============ HISTORY VIEW ============ -->
