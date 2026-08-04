@@ -1330,16 +1330,36 @@
                                       // opening a new row auto-closes the last one
 
   function closeSwipe(item, content, animate) {
-    if (!animate) content.style.transition = 'none';
-    content.style.transform = 'translateX(0px)';
-    item.classList.remove('is-swipe-open');
-    if (swipeOpenItem === item) swipeOpenItem = null;
     if (!animate) {
+      // Instant close (e.g. right before the row is deleted) — nothing to
+      // wait for, hide immediately.
+      content.style.transition = 'none';
+      content.style.transform = 'translateX(0px)';
+      item.classList.remove('is-swipe-open', 'is-swiping');
+      if (swipeOpenItem === item) swipeOpenItem = null;
       // Force layout so this instant close doesn't get coalesced with a
       // later, genuinely-animated transform change on the same element.
       void content.offsetHeight;
       content.style.transition = '';
+      return;
     }
+
+    // Animated close: .history-item__swipe-action is display:none unless
+    // .history-item has is-swiping or is-swipe-open (see styles.css). This
+    // row's is-swipe-open (if any) comes off now since it's no longer
+    // "open", but is-swiping goes on and stays on for the *entire* .15s
+    // slide-back transition, so the button stays visible while the row
+    // slides over it — removing it early made the button disappear
+    // instantly instead of being smoothly covered mid-slide.
+    item.classList.add('is-swiping');
+    item.classList.remove('is-swipe-open');
+    if (swipeOpenItem === item) swipeOpenItem = null;
+    content.style.transform = 'translateX(0px)';
+    content.addEventListener('transitionend', function onDone(e) {
+      if (e.propertyName !== 'transform') return; // ignore unrelated transitions bubbling through
+      content.removeEventListener('transitionend', onDone);
+      item.classList.remove('is-swiping');
+    });
   }
 
   function openSwipe(item, content) {
@@ -1349,6 +1369,10 @@
     }
     content.style.transform = 'translateX(-' + SWIPE_REVEAL_PX + 'px)';
     item.classList.add('is-swipe-open');
+    // is-swipe-open (just added) now covers visibility for as long as this
+    // row stays open, so the is-swiping flag from the drag that got us
+    // here (see attachSwipeHandlers below) is no longer needed.
+    item.classList.remove('is-swiping');
     swipeOpenItem = item;
   }
 
@@ -1412,7 +1436,9 @@
       var finalX = startTransform + dx;
       var shouldOpen = finalX < -(SWIPE_REVEAL_PX * SWIPE_OPEN_SNAP_RATIO);
       content.style.transition = '';
-      item.classList.remove('is-swiping'); // is-swipe-open (below) takes over if opening
+      // is-swiping is no longer cleared here — closeSwipe()/openSwipe()
+      // now own that class's lifecycle (closeSwipe keeps it on through the
+      // close animation instead of dropping it the instant the drag ends).
       if (shouldOpen) openSwipe(item, content); else closeSwipe(item, content, true);
       // suppressClick is normally consumed by the click listener in
       // buildItem(); this is a fallback in case no click event follows
