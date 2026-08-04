@@ -796,7 +796,8 @@ button { font-family: inherit; }
 .search-field__clear svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
 .history-list {
   list-style: none; margin: 0 0 18px; padding: 0;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  position: relative; /* containing block for the ::after border overlay below */
+  background: var(--surface); border-radius: var(--radius-lg);
   /* Rounded-card look without plain overflow:hidden — overflow:hidden on
      this ancestor clips fine, but it also silently breaks
      position:sticky on .history-date-header below (any ancestor with
@@ -833,6 +834,27 @@ button { font-family: inherit; }
      edge, and content still can't spill out past the rounded corners. */
   clip-path: inset(0 round var(--radius-lg));
 }
+/* Border drawn as its own overlay rather than as .history-list's own
+   `border`. A box's own border+border-radius is one integrated, natively
+   anti-aliased paint operation — but the clip-path above is a *second*,
+   independently-rasterized curve at the same radius, and on-device the
+   two don't always land on identical pixels, leaving a rough/thin seam
+   right where a straight edge turns into the curve (confirmed top-right,
+   where the crisp top border visibly thins out going into the corner).
+   This ::after is sized identically to .history-list (inset:0, same
+   radius) but is never itself run through a second clip — so its
+   border+radius paints as one clean native curve, matching the corner
+   exactly instead of fighting the clip-path's version of the same curve.
+   z-index:1 keeps it above row content — rows now run edge-to-edge since
+   .history-list no longer reserves its own 1px of border space — while
+   staying below the sticky date-header (z-index:2), matching how the
+   border already sat beneath everything before this change. */
+.history-list::after {
+  content: '';
+  position: absolute; inset: 0; z-index: 1;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  pointer-events: none;
+}
 .history-date-header {
   position: sticky; top: var(--sticky-nav-offset, 0px); z-index: 2;
   padding: 7px 18px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
@@ -842,7 +864,6 @@ button { font-family: inherit; }
 .history-item {
   position: relative; /* anchors the absolutely-positioned swipe-action below */
   overflow: hidden;    /* clips the swipe-action until .history-item__content reveals it */
-  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
 /* :last-child alone can't reach the last visible row here — the list
@@ -852,14 +873,31 @@ button { font-family: inherit; }
    the actual last child. :has() targets whichever .history-item is
    immediately followed by that trailing spacer instead, so the border
    correctly disappears from whatever row is currently rendered last,
-   no matter how the virtualized window shifts. */
-.history-item:has(+ .history-vlist-spacer:last-child) { border-bottom: none; }
-/* Padding/background/cursor live on the content wrapper (not .history-item
-   itself) because the wrapper is what slides left on swipe (#11) — .history-item
-   stays a static, unpadded positioning + clipping context so the swipe-action
-   behind it is never visible until revealed. */
+   no matter how the virtualized window shifts. (Targets
+   .history-item__content now — see below for why the border itself
+   lives there.) */
+.history-item:has(+ .history-vlist-spacer:last-child) .history-item__content { border-bottom: none; }
+/* Padding/background/cursor/border live on the content wrapper (not
+   .history-item itself) because the wrapper is what slides left on swipe
+   (#11) — .history-item stays a static, unpadded positioning + clipping
+   context so the swipe-action behind it is never visible until revealed.
+   The divider *border* specifically moved here from .history-item: it
+   used to sit on .history-item itself, flush against the red
+   .history-item__swipe-action (z-index:0) hidden directly behind it.
+   overflow:hidden on .history-item clips at the padding edge, not the
+   border paint itself, so that red bled/anti-aliased into the grey
+   border line for the swipe-action's full width — on every row, at rest,
+   not just mid-swipe (confirmed on-device: a ~76px pink tint at the end
+   of every row's divider, exactly the swipe-action's width). Since
+   .history-item__content is the opaque, z-index:1 layer that already
+   fully covers the swipe-action at rest, drawing the border as part of
+   *its* box paints it in front of the red instead of directly beside it,
+   so there's nothing left to bleed into. (It also slides away with the
+   content while a row's swipe is open, which is fine — no divider is
+   needed under the exposed Delete button.) */
 .history-item__content {
   padding: 13px 18px; background: var(--surface); position: relative; z-index: 1;
+  border-bottom: 1px solid var(--border);
   transition: transform .15s ease; touch-action: pan-y; /* let vertical page scroll through untouched */
 }
 .history-item:hover .history-item__content { background: var(--surface-sunken); }
