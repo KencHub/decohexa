@@ -921,7 +921,7 @@ button { font-family: inherit; }
   padding: 13px 20px 13px 18px; background: var(--surface); position: relative; z-index: 1;
   margin-right: -2px;
   border-bottom: 1px solid var(--border);
-  transition: transform .15s ease; touch-action: pan-y; /* let vertical page scroll through untouched */
+  transition: transform .15s ease, background-color .2s ease, border-color .2s ease; touch-action: pan-y; /* let vertical page scroll through untouched */
 }
 /* Gated to real-mouse devices only: (hover: hover) and (pointer: fine)
    excludes touchscreens. A mouse reliably fires :hover on arrival and

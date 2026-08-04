@@ -859,6 +859,13 @@
       pendingRenderFrame = null;
     }
 
+    // render() is only ever reached for a force=true rebuild (add, delete,
+    // search/filter, expand/collapse, select mode) — exactly the cases
+    // where a row's content, not just its on-screen position, may have
+    // changed, so any previously recycled node could now be stale.
+    itemElementCache.clear();
+    headerElementCache.clear();
+
     var full = App.state.history;
 
     // A delete (single-row, bulk, or Clear) can remove the entry that's
@@ -944,6 +951,21 @@
   var currentFlatItems = [];       // rebuilt by render(): [{type:'header',...}|{type:'item',...}]
   var itemHeightCache = new Map(); // entry -> { collapsed?: px, expanded?: px }
   var headerHeightCache = new Map(); // groupKey -> px
+  // Recycled DOM nodes, keyed the same way as the height caches above.
+  // renderVisibleWindow(false) (pure scroll — content is guaranteed
+  // unchanged, see its own comment) reuses whatever node already exists
+  // here instead of calling buildItem()/buildDateHeader() again, so a row
+  // that's still on screen after the window shifts keeps its actual DOM
+  // node (and therefore its swipe listeners, any in-flight CSS
+  // transition, etc.) instead of being torn down and rebuilt from
+  // scratch on every scroll frame — that churn was the source of the
+  // scroll jank/flicker users were seeing in the history list.
+  // render() (every force=true caller: add/delete/search/filter/expand/
+  // select-mode) clears both caches up front, since those are exactly
+  // the cases where a row's *content* (not just its position) may have
+  // changed, so a stale cached node would show wrong state.
+  var itemElementCache = new Map();   // entry -> <li class="history-item">
+  var headerElementCache = new Map(); // groupKey -> <li class="history-date-header">
   var DEFAULT_ITEM_HEIGHT = 74;
   var DEFAULT_EXPANDED_HEIGHT = 320;
   var DEFAULT_HEADER_HEIGHT = 34;
@@ -1135,16 +1157,32 @@
     var frag = document.createDocumentFragment();
     for (var i = layout.start; i <= layout.end; i++) {
       var row = currentFlatItems[i];
-      frag.appendChild(row.type === 'header'
-        ? buildDateHeader(row.label, row.groupKey)
-        : buildItem(row.entry));
+      var el;
+      if (row.type === 'header') {
+        el = headerElementCache.get(row.groupKey);
+        if (!el) {
+          el = buildDateHeader(row.label, row.groupKey);
+          headerElementCache.set(row.groupKey, el);
+        }
+      } else {
+        el = itemElementCache.get(row.entry);
+        if (!el) {
+          el = buildItem(row.entry);
+          itemElementCache.set(row.entry, el);
+        }
+      }
+      frag.appendChild(el); // moves the node if it's already attached elsewhere — no rebuild
     }
 
     els.list.innerHTML = '';
     els.list.appendChild(topSpacer);
     if (needsPinnedCopy) {
       var headerRow = currentFlatItems[pinnedIdx];
-      pinnedHeaderEl = buildDateHeader(headerRow.label, headerRow.groupKey);
+      pinnedHeaderEl = headerElementCache.get(headerRow.groupKey);
+      if (!pinnedHeaderEl) {
+        pinnedHeaderEl = buildDateHeader(headerRow.label, headerRow.groupKey);
+        headerElementCache.set(headerRow.groupKey, pinnedHeaderEl);
+      }
       els.list.appendChild(pinnedHeaderEl);
       els.list.appendChild(midSpacer);
     } else {
