@@ -74,6 +74,16 @@
     btnClear: document.getElementById('btn-history-clear'),
     footerDefault: document.getElementById('history-footer'),
     footerSelect: document.getElementById('history-footer-select'),
+    // Desktop master-detail pane (min-width:981px — hidden by CSS below
+    // that, see styles.css). Present in the DOM at all widths so this file
+    // doesn't need to branch on viewport size: updateDetailPane() below
+    // just keeps it in sync unconditionally, and CSS alone decides whether
+    // it's ever visible. Optional chaining-free null checks throughout
+    // this file's use of these three are what let history.js keep working
+    // unmodified if that markup is ever removed.
+    detailPane: document.getElementById('history-detail-pane'),
+    detailPaneEmpty: document.getElementById('history-detail-pane-empty'),
+    detailPaneContent: document.getElementById('history-detail-pane-content'),
     btnSelectToggle: document.getElementById('btn-history-select-toggle'),
     btnSelectAll: document.getElementById('btn-history-select-all'),
     btnSelectCancel: document.getElementById('btn-history-select-cancel'),
@@ -850,10 +860,25 @@
     }
 
     var full = App.state.history;
+
+    // A delete (single-row, bulk, or Clear) can remove the entry that's
+    // currently expanded/active without going through toggleSelectMode()
+    // (the only place that already nulls expandedEntry) — e.g. deleting
+    // it via bulk-select on desktop, or a future pane action. Left dangling,
+    // it was harmless before (the inline detail simply had no row left to
+    // render into), but updateDetailPane() below reads expandedEntry
+    // independently of the row list, so a stale reference there would
+    // show a deleted entry's content. Only clear on true deletion (not on
+    // being filtered out by search/format, which is a separate, expected
+    // case) — indexOf against the *unfiltered* history is what tells them apart.
+    if (expandedEntry && full.indexOf(expandedEntry) === -1) expandedEntry = null;
+    if (activeEntry && full.indexOf(activeEntry) === -1) activeEntry = null;
+
     var filtered = getFiltered();
 
     updateCounts(filtered);
     syncSelectFooter(filtered);
+    updateDetailPane();
 
     if (!full.length) {
       currentFlatItems = [];
@@ -1386,6 +1411,28 @@
 
     item.addEventListener('pointerup', finishDrag);
     item.addEventListener('pointercancel', finishDrag);
+  }
+
+  // ---- desktop master-detail pane ----------------------------------------
+  // Mirrors expandedEntry into the standalone pane (#history-detail-pane)
+  // that CSS shows only at desktop widths, reusing buildDetail() below
+  // rather than a second copy of it — same fields, same Copy/Copy
+  // details/Export .txt buttons, same behavior, just mounted in a
+  // different container. Runs unconditionally from render() (see there
+  // for why) so it stays correct regardless of viewport size; on mobile
+  // widths the pane is simply display:none and this is inert extra work,
+  // not a bug.
+  function updateDetailPane() {
+    if (!els.detailPane) return; // markup not present — nothing to sync
+    els.detailPaneContent.innerHTML = '';
+    if (!expandedEntry) {
+      els.detailPaneContent.hidden = true;
+      els.detailPaneEmpty.hidden = false;
+      return;
+    }
+    els.detailPaneEmpty.hidden = true;
+    els.detailPaneContent.hidden = false;
+    els.detailPaneContent.appendChild(buildDetail(expandedEntry));
   }
 
   function buildDetail(entry) {

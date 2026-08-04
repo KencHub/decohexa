@@ -744,6 +744,37 @@ button { font-family: inherit; }
 .history-controls { display: flex; gap: 10px; }
 .field--search { width: 220px; }
 
+/* Master-detail split — same idea as .scan-layout / .generate-layout
+   above, just applied to History. Collapses to one column at the same
+   980px breakpoint those two already use (see the max-width:980px block
+   further down), so all three views change shape at the same point
+   rather than each picking their own. */
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.history-list-pane { min-width: 0; } /* lets long unbroken content (a JWT, a URL) shrink instead of forcing the grid track wider */
+
+.history-detail-pane {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  min-height: 200px;
+  /* Stays in view as the list scrolls past it, without giving the list
+     its own separate scroll container — the *page* still scrolls as one
+     piece, same as every other view; only this pane pins in place within
+     it. Reuses the same offset the sticky date-headers already use, so
+     it settles just under the top nav rather than under it. */
+  position: sticky; top: var(--sticky-nav-offset, 0px);
+}
+.history-detail-pane__empty { color: var(--ink-faint); font-size: 13px; text-align: center; padding: 24px 8px; margin: 0; }
+/* The content dropped in here is buildDetail()'s own .history-detail node
+   (see history.js) — its margin-top/border-top are meant to separate it
+   from a row it's normally nested under, which doesn't apply when it's
+   the pane's only content. */
+.history-detail-pane__content > .history-detail { margin-top: 0; padding-top: 0; border-top: none; }
+
 /* Custom search-clear button, replacing the browser's native one.
    type="search" inputs get a built-in clear "x" from the browser, but it
    can't be styled — it renders in the browser's own default color
@@ -808,6 +839,18 @@ button { font-family: inherit; }
 .history-preview { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .history-item.is-expanded .history-preview { white-space: pre-wrap; word-break: break-all; }
 .history-empty { padding: 40px 18px; text-align: center; color: var(--ink-faint); font-size: 13px; list-style: none; }
+
+/* Desktop: the detail pane (above) is what shows an expanded entry now,
+   so the same content appended inline into the row (history.js still
+   builds it either way — see updateDetailPane()'s comment) stays hidden
+   here. This is what keeps every row a uniform height for virtualization
+   at desktop widths, matching this same 980px breakpoint everywhere else
+   in this file rather than introducing a new one. is-active (the row
+   highlight showing which entry the pane is currently displaying) is
+   untouched — only the inline detail block is suppressed. */
+@media (min-width: 981px) {
+  .history-item__content > .history-detail { display: none; }
+}
 .history-footer { display: flex; gap: 10px; flex-wrap: wrap; }
 .history-footer--select { align-items: center; }
 .history-select-count { font-size: 13px; color: var(--ink-soft); margin-right: auto; }
@@ -1069,6 +1112,13 @@ button { font-family: inherit; }
   .capture-panel { position: static; min-height: 0; }
   .capture-panel__empty { padding: 16px 6px; }
   .generate-layout { grid-template-columns: 1fr; }
+
+  /* History goes back to a single column and the detail pane disappears
+     entirely — below this width, tapping a row expands its detail
+     inline instead (.history-item.is-expanded, untouched by any of the
+     master-detail CSS above), exactly like it did before that existed. */
+  .history-layout { grid-template-columns: 1fr; }
+  .history-detail-pane { display: none; }
 
   /* Preview box: back to hidden-until-generated on mobile/tablet — no
      large empty box before there's anything to show. .has-result is

@@ -358,29 +358,57 @@
         </div>
       </header>
 
-      <ul class="history-list" id="history-list">
-        <li class="history-empty" id="history-empty">Nothing scanned yet.</li>
-      </ul>
+      <!-- ============ HISTORY MASTER-DETAIL LAYOUT ============
+           Two grid columns at desktop widths (matching .scan-layout /
+           .generate-layout's existing 1fr+340px / 380px+1fr pattern — see
+           styles.css), collapsing to a single column below the same
+           980px breakpoint those already use. Below that breakpoint,
+           .history-detail-pane is display:none and History behaves
+           exactly as it did before this: tapping a row expands its
+           detail inline via .history-item's own is-expanded state.
+           Above it, that inline detail is hidden instead (rows stay a
+           uniform height) and .history-detail-pane shows the same
+           content — history.js's updateDetailPane() populates it by
+           reusing the exact same buildDetail() the inline row uses, so
+           there's one source of truth for what a detail view contains,
+           just two CSS-selected places it can appear. -->
+      <div class="history-layout">
+        <div class="history-list-pane">
+          <ul class="history-list" id="history-list">
+            <li class="history-empty" id="history-empty">Nothing scanned yet.</li>
+          </ul>
 
-      <div class="history-footer" id="history-footer">
-        <button class="btn btn--ghost" id="btn-history-export-csv">Export CSV</button>
-        <button class="btn btn--ghost" id="btn-history-export-json">Export JSON</button>
-        <button class="btn btn--ghost" id="btn-history-select-toggle">Select</button>
-        <button class="btn btn--danger-ghost" id="btn-history-clear">Clear history</button>
-      </div>
+          <div class="history-footer" id="history-footer">
+            <button class="btn btn--ghost" id="btn-history-export-csv">Export CSV</button>
+            <button class="btn btn--ghost" id="btn-history-export-json">Export JSON</button>
+            <button class="btn btn--ghost" id="btn-history-select-toggle">Select</button>
+            <button class="btn btn--danger-ghost" id="btn-history-clear">Clear history</button>
+          </div>
 
-      <!-- Replaces the footer above while bulk-selecting. Kept as a
-           separate element rather than swapping button labels in place,
-           since the two states have a different number/kind of controls
-           (Select all, per-selection export/delete, Cancel) — toggling
-           visibility of two whole blocks is simpler than reshuffling one. -->
-      <div class="history-footer history-footer--select" id="history-footer-select" hidden>
-        <span class="history-select-count" id="history-select-count">0 selected</span>
-        <button class="btn btn--sm btn--ghost" id="btn-history-select-all">Select all</button>
-        <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-csv">Export CSV</button>
-        <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-json">Export JSON</button>
-        <button class="btn btn--sm btn--danger-ghost" id="btn-history-delete-selected">Delete</button>
-        <button class="btn btn--sm btn--ghost" id="btn-history-select-cancel">Cancel</button>
+          <!-- Replaces the footer above while bulk-selecting. Kept as a
+               separate element rather than swapping button labels in place,
+               since the two states have a different number/kind of controls
+               (Select all, per-selection export/delete, Cancel) — toggling
+               visibility of two whole blocks is simpler than reshuffling one. -->
+          <div class="history-footer history-footer--select" id="history-footer-select" hidden>
+            <span class="history-select-count" id="history-select-count">0 selected</span>
+            <button class="btn btn--sm btn--ghost" id="btn-history-select-all">Select all</button>
+            <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-csv">Export CSV</button>
+            <button class="btn btn--sm btn--ghost" id="btn-history-export-selected-json">Export JSON</button>
+            <button class="btn btn--sm btn--danger-ghost" id="btn-history-delete-selected">Delete</button>
+            <button class="btn btn--sm btn--ghost" id="btn-history-select-cancel">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Desktop-only (see the layout comment above). Populated by
+             history.js's updateDetailPane(), called from render() every
+             time the list re-renders, so it never needs its own
+             show/click wiring here — selecting a row in the list is what
+             drives it. -->
+        <aside class="history-detail-pane" id="history-detail-pane" aria-label="Selected entry details">
+          <p class="history-detail-pane__empty" id="history-detail-pane-empty">Select an item from the list to see its full details here.</p>
+          <div class="history-detail-pane__content" id="history-detail-pane-content" hidden></div>
+        </aside>
       </div>
     </section>
 
