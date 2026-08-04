@@ -851,7 +851,25 @@ button { font-family: inherit; }
 @media (min-width: 981px) {
   .history-item__content > .history-detail { display: none; }
 }
-.history-footer { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Pinned to the bottom of the viewport rather than sitting in normal flow
+   after the last row — with 40+ entries, an in-flow footer meant scrolling
+   past the entire list just to reach Export/Clear (or, in select mode,
+   losing access to Delete while mid-selection). Same sticky mechanism
+   .history-date-header/.history-detail-pane already use above, just
+   bottom:0 instead of top:var(--sticky-nav-offset). Applies to both
+   states automatically since the default and select-mode bars share this
+   base class — only one is ever unhidden at a time (see history.js).
+   Solid background + top border + shadow are needed now that this floats
+   over list rows while scrolling, instead of always sitting on bare page
+   background below the list. */
+.history-footer {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  position: sticky; bottom: 0; z-index: 3;
+  padding: 12px 4px; margin-top: -6px;
+  background: var(--canvas);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 16px -8px rgba(20, 24, 28, .12);
+}
 .history-footer--select { align-items: center; }
 .history-select-count { font-size: 13px; color: var(--ink-soft); margin-right: auto; }
 
