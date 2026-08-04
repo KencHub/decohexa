@@ -17,7 +17,7 @@
 // Bump this (v2 -> v3 -> ...) any time a file in SHELL_FILES changes.
 // The browser only re-copies the shell files when this string changes —
 // editing history.js/app.js/etc. alone does nothing until this does too.
-var CACHE_NAME = 'scanner-shell-v25'; // v24 -> v25: removed missing maskable icon files that were 404ing and breaking install
+var CACHE_NAME = 'scanner-shell-v27'; // v25 -> v26: status banner redesign (full-width instead of shrink-to-fit, flatter in-flow styling instead of floating-toast shadow, icons instead of a plain dot) in index.html/styles.css
 
 // Everything the app needs to boot and run with zero network access.
 // ZXing is vendored locally (see index.html's comment on that decision),

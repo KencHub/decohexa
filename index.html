@@ -97,6 +97,10 @@
            it's already taken control, so all "Reload" needs to do is
            re-fetch the page. -->
       <div class="status-banner update-banner" id="update-banner" role="status" hidden>
+        <svg class="status-banner__icon status-banner__icon--brand" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 8v4M12 16h.01"></path>
+          <circle cx="12" cy="12" r="9"></circle>
+        </svg>
         <span class="status-banner__text">New version available</span>
         <div class="update-banner__actions">
           <button class="btn btn--sm btn--primary" id="btn-update-reload">Reload</button>
@@ -110,7 +114,15 @@
            vendored ZXing wasm), so it still works offline; the note just
            says so up front rather than the person wondering. -->
       <div class="status-banner offline-banner" id="offline-banner" role="status" hidden>
-        <span class="offline-banner__dot" aria-hidden="true"></span>
+        <svg class="status-banner__icon status-banner__icon--warning" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1 1l22 22"></path>
+          <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+          <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+          <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+          <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+          <path d="M12 20h.01"></path>
+        </svg>
         <span class="status-banner__text">You're offline — scanning still works</span>
       </div>
 
