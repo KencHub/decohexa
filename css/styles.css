@@ -923,7 +923,16 @@ button { font-family: inherit; }
   border-bottom: 1px solid var(--border);
   transition: transform .15s ease; touch-action: pan-y; /* let vertical page scroll through untouched */
 }
-.history-item:hover .history-item__content { background: var(--surface-sunken); }
+/* Gated to real-mouse devices only: (hover: hover) and (pointer: fine)
+   excludes touchscreens. A mouse reliably fires :hover on arrival and
+   clears it on leaving, so this is safe/correct there unchanged. Touch
+   has no such "leaving" event — tapping a row can turn :hover on with no
+   guaranteed way to turn it back off, which was leaving rows stuck with
+   a grey tint that meant nothing (not selected, not expanded, just
+   whichever row was last touched before the browser lost track). */
+@media (hover: hover) and (pointer: fine) {
+  .history-item:hover .history-item__content { background: var(--surface-sunken); }
+}
 .history-item.is-active .history-item__content { background: var(--brand-soft); }
 .history-row1 { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
 .history-time { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }

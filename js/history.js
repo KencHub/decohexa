@@ -1300,7 +1300,14 @@
         return;
       }
       expandedEntry = (expandedEntry === entry) ? null : entry;
-      activeEntry = entry;
+      // activeEntry (drives the teal highlight, see is-active in buildItem())
+      // used to always be set to whichever row was just clicked, even when
+      // the click above just collapsed that same row (expandedEntry -> null).
+      // That left the row highlighted with nothing shown in the detail pane
+      // — the highlight is supposed to mean "this is what's currently being
+      // shown," so it needs to clear exactly when expandedEntry does, not
+      // just track raw clicks.
+      activeEntry = expandedEntry;
       render();
     });
 
