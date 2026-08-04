@@ -797,19 +797,37 @@ button { font-family: inherit; }
 .history-list {
   list-style: none; margin: 0 0 18px; padding: 0;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  /* Rounded-card look without plain overflow:hidden — overflow:hidden on
+     this ancestor clips fine, but it also silently breaks
+     position:sticky on .history-date-header below (any ancestor with
+     overflow != visible becomes sticky's containing block for scroll
+     purposes, and since .history-list itself never scrolls, the header
+     just sits there static instead of pinning to the viewport — confirmed
+     on-device).
+     Previously this used `.history-list > *:first-child`/`:last-child` to
+     paint the radius onto whichever row happened to be structurally first/
+     last instead. That broke the moment virtualization (Split 2b, #3, see
+     history.js) was added: renderVisibleWindow() always inserts the
+     invisible topSpacer/bottomSpacer <li>s as the literal first and last
+     children (to reserve scroll height for off-screen rows), so those
+     zero-height spacers — not the visible header/item — were the ones
+     getting rounded, leaving every real row square inside a rounded
+     outline no matter which row was actually on top or bottom.
+     clip-path sidesteps both problems at once: it clips whatever is
+     inside to this rounded shape regardless of DOM order (so spacers vs.
+     real rows no longer matters), and — unlike overflow — it does not
+     establish a new containing block for position:sticky descendants, so
+     the date-header keeps pinning correctly while scrolling.
+     Inset by the border width (1px), with the radius reduced to match,
+     rather than tracing the exact same outer edge as border-radius above.
+     Two independently-rasterized curves along the identical path (one
+     from border-radius painting the border, one from clip-path cutting
+     the box) don't quite land on the same pixels, which showed up as a
+     jagged/doubled seam right on the corner. Clipping strictly inside the
+     border removes that overlap — clip-path now only ever touches the
+     fill content, never re-draws the border's own edge. */
+  clip-path: inset(1px round calc(var(--radius-lg) - 1px));
 }
-/* Rounded-card look without overflow:hidden — overflow:hidden on this
-   ancestor was clipping the box for the rounded corners, but it also
-   silently breaks position:sticky on .history-date-header below (any
-   ancestor with overflow != visible becomes sticky's containing block for
-   scroll purposes, and since .history-list itself never scrolls, the
-   header just sat there static instead of pinning to the viewport as the
-   page scrolled — confirmed on-device). Applying the radius to whichever
-   element is currently first/last achieves the same visual without that
-   side effect, and stays correct automatically as headers/rows are added
-   or removed. */
-.history-list > *:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
-.history-list > *:last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); overflow: hidden; }
 .history-date-header {
   position: sticky; top: var(--sticky-nav-offset, 0px); z-index: 2;
   padding: 7px 18px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
