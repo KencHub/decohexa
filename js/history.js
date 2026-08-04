@@ -1382,6 +1382,10 @@
           return;
         }
         item.dataset.suppressClick = '1';
+        // Reveal .history-item__swipe-action (display:none by default —
+        // see styles.css) now that this is confirmed to be a real
+        // horizontal swipe, not a tap or a vertical scroll.
+        item.classList.add('is-swiping');
       }
       if (!horizontal) return;
 
@@ -1401,6 +1405,7 @@
       var finalX = startTransform + dx;
       var shouldOpen = finalX < -(SWIPE_REVEAL_PX * SWIPE_OPEN_SNAP_RATIO);
       content.style.transition = '';
+      item.classList.remove('is-swiping'); // is-swipe-open (below) takes over if opening
       if (shouldOpen) openSwipe(item, content); else closeSwipe(item, content, true);
       // suppressClick is normally consumed by the click listener in
       // buildItem(); this is a fallback in case no click event follows

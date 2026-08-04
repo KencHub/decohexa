@@ -894,9 +894,32 @@ button { font-family: inherit; }
    *its* box paints it in front of the red instead of directly beside it,
    so there's nothing left to bleed into. (It also slides away with the
    content while a row's swipe is open, which is fine — no divider is
-   needed under the exposed Delete button.) */
+   needed under the exposed Delete button.)
+   margin-right/padding-right: fixing the border above stopped the leak
+   along the *bottom* edge, but the same red was still peeking through a
+   hairline gap on the *right* edge at non-100% browser zoom — confirmed
+   on-device as one continuous pink line down the whole card's right side
+   at reduced zoom, absent at 100%. Cause: at fractional zoom, this
+   element's right edge (normal block flow, width:auto) and the
+   swipe-action's right edge (position:absolute; right:0 on the sibling
+   .history-item) are two *independently computed* box-model results
+   against the same containing block — each can round to a different
+   physical pixel, occasionally leaving a sub-device-pixel sliver where
+   neither box's paint reaches, exposing whatever's further back (the red
+   button) through the gap. Rather than trying to make two separately-
+   computed edges agree, margin-right:-2px deliberately grows this box
+   2px past .history-item's true right edge — comfortably wider than any
+   realistic rounding error — and .history-item's own overflow:hidden
+   (a single element clipping its own child, not a cross-element
+   comparison, so no independent rounding is involved) clips the overhang
+   away. The visible right edge is now always at or beyond the true edge,
+   never short of it, at any zoom. padding-right is bumped from 18px to
+   20px (18 + the 2px overhang) so the visible text/badges keep sitting
+   exactly 18px from the row's true edge, unchanged from before — the
+   inner content width works out identical either way. */
 .history-item__content {
-  padding: 13px 18px; background: var(--surface); position: relative; z-index: 1;
+  padding: 13px 20px 13px 18px; background: var(--surface); position: relative; z-index: 1;
+  margin-right: -2px;
   border-bottom: 1px solid var(--border);
   transition: transform .15s ease; touch-action: pan-y; /* let vertical page scroll through untouched */
 }
@@ -952,8 +975,17 @@ button { font-family: inherit; }
 /* Swipe-to-delete (#11) — sits behind .history-item__content, revealed by
    translating the content leftward. Not built while select mode is active
    (see buildItem() in history.js), so no is-selectable/select-mode
-   interaction to account for here. */
-.history-item__swipe-action {
+   interaction to account for here.
+   display:none by default (not just z-index:0 behind an opaque cover) is
+   deliberate: a hidden element paints zero pixels, so there's no red box
+   sitting under .history-item__content for any sub-pixel rounding gap to
+   ever expose, at any zoom level. history.js adds is-swiping (live drag)
+   or is-swipe-open (drag finished, row left open) to .history-item to
+   flip this to display:flex only while the button is actually meant to
+   be visible. */
+.history-item__swipe-action { display: none; }
+.history-item.is-swiping .history-item__swipe-action,
+.history-item.is-swipe-open .history-item__swipe-action {
   position: absolute; top: 0; right: 0; bottom: 0; width: 76px;
   display: flex; align-items: stretch; z-index: 0;
 }
