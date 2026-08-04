@@ -818,15 +818,20 @@ button { font-family: inherit; }
      real rows no longer matters), and — unlike overflow — it does not
      establish a new containing block for position:sticky descendants, so
      the date-header keeps pinning correctly while scrolling.
-     Inset by the border width (1px), with the radius reduced to match,
-     rather than tracing the exact same outer edge as border-radius above.
-     Two independently-rasterized curves along the identical path (one
-     from border-radius painting the border, one from clip-path cutting
-     the box) don't quite land on the same pixels, which showed up as a
-     jagged/doubled seam right on the corner. Clipping strictly inside the
-     border removes that overlap — clip-path now only ever touches the
-     fill content, never re-draws the border's own edge. */
-  clip-path: inset(1px round calc(var(--radius-lg) - 1px));
+     Traces the SAME edge and radius as the border-box itself (inset(0),
+     matching border-radius exactly) rather than insetting past it. An
+     earlier version inset this 1px with a correspondingly reduced radius,
+     on the theory that clipping strictly inside the border would avoid a
+     jagged doubled seam where two independently-rasterized curves meet.
+     In practice `inset(1px ...)` insets by 1px on *all four sides*, not
+     just at the corners — and since the border is itself exactly 1px
+     wide, that inset band is precisely where the border is painted, so
+     the border was being clipped away completely, top/bottom/left/right,
+     not just smoothed at the corners. Using the same radius at zero
+     inset lets the clip curve and the border's own curve trace the same
+     path on the same box, so the border stays fully visible on every
+     edge, and content still can't spill out past the rounded corners. */
+  clip-path: inset(0 round var(--radius-lg));
 }
 .history-date-header {
   position: sticky; top: var(--sticky-nav-offset, 0px); z-index: 2;
@@ -840,7 +845,15 @@ button { font-family: inherit; }
   border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
-.history-item:last-child { border-bottom: none; }
+/* :last-child alone can't reach the last visible row here — the list
+   virtualization in history.js always appends a zero-height
+   .history-vlist-spacer <li> after the real rows (to hold scroll height
+   for off-screen content), so that spacer, not the last item, is always
+   the actual last child. :has() targets whichever .history-item is
+   immediately followed by that trailing spacer instead, so the border
+   correctly disappears from whatever row is currently rendered last,
+   no matter how the virtualized window shifts. */
+.history-item:has(+ .history-vlist-spacer:last-child) { border-bottom: none; }
 /* Padding/background/cursor live on the content wrapper (not .history-item
    itself) because the wrapper is what slides left on swipe (#11) — .history-item
    stays a static, unpadded positioning + clipping context so the swipe-action
