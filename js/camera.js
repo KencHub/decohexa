@@ -56,6 +56,42 @@
     }
   }
 
+  // getUserMedia() resolving does NOT guarantee the <video> element ever
+  // actually renders a frame — some embedded/in-app browser webviews (e.g.
+  // Acode's) grant the stream but never attach real video data, leaving the
+  // browser's native "nothing is playing" fallback exposed with no error
+  // ever thrown. This waits for genuine proof of a live frame (a fired
+  // 'loadeddata' event, or non-zero video dimensions in case the event
+  // already fired before the listener attached) and times out if neither
+  // shows up, so the caller can treat it as a normal camera-error instead
+  // of silently leaving a dead video element on screen.
+  function waitForFirstFrame(video, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        resolve();
+        return;
+      }
+
+      var settled = false;
+      var timer = window.setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        video.removeEventListener('loadeddata', onLoaded);
+        reject(new Error('frame-timeout'));
+      }, timeoutMs);
+
+      function onLoaded() {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        video.removeEventListener('loadeddata', onLoaded);
+        resolve();
+      }
+
+      video.addEventListener('loadeddata', onLoaded);
+    });
+  }
+
   function classifyGetUserMediaError(err) {
     var name = err && err.name;
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
@@ -101,6 +137,20 @@
 
     video.srcObject = stream;
     try { await video.play(); } catch (err) { /* autoplay quirks — video element has muted+playsinline set */ }
+
+    try {
+      await waitForFirstFrame(video, 2500);
+    } catch (err) {
+      // The stream was granted but never actually produced a frame (seen
+      // in some embedded webviews). Tear it down and fail the same way a
+      // rejected getUserMedia() call would, so the caller's existing
+      // camera-error handling covers this case too.
+      stopStream();
+      video.srcObject = null;
+      var frameErr = new Error('camera-error');
+      frameErr.code = 'camera-error';
+      throw frameErr;
+    }
 
     currentTrack = stream.getVideoTracks()[0] || null;
     torchOn = false;

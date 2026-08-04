@@ -388,16 +388,37 @@ button { font-family: inherit; }
 .viewfinder.is-locked .reticle .reticle__corner { border-color: var(--success); }
 .viewfinder.is-locked .viewfinder-flash { opacity: 1; }
 .viewfinder-flash {
-  position: absolute; inset: 0; background: var(--success);
-  opacity: 0; transition: opacity .5s ease;
-  mix-blend-mode: multiply;
+  position: absolute; inset: 0; background: rgba(94, 174, 114, .35);
+  opacity: 0; transition: opacity .35s ease;
+  pointer-events: none;
 }
 
 .viewfinder__empty {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   text-align: center; padding: 0 15%;
   color: var(--ink-faint); font-size: 13px;
+  transition: opacity .2s ease;
 }
+.viewfinder__empty[hidden] { display: none; }
+
+/* Success pill — fades in over the flash to name what was captured, since
+   the tint alone (see .viewfinder-flash above) doesn't say anything on its
+   own. Sits on top of the flash and empty-state layers (both z-index 0 by
+   DOM order), same visual language as .badge. */
+.viewfinder__pill {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%) scale(.85);
+  background: var(--success); color: #fff;
+  font-weight: 600; font-size: 13.5px;
+  padding: 9px 16px; border-radius: 100px;
+  display: flex; align-items: center; gap: 7px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+  white-space: nowrap;
+}
+.viewfinder__pill.is-shown { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.viewfinder__pill svg { width: 15px; height: 15px; flex: none; }
 
 .viewfinder__error {
   position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;

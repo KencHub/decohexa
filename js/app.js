@@ -17,6 +17,8 @@
     viewportWrap: document.getElementById('viewport-wrap'),
     viewportStatusLabel: document.getElementById('viewport-status-label'),
     viewportEmpty: document.getElementById('viewport-empty'),
+    viewportPill: document.getElementById('viewport-pill'),
+    viewportPillText: document.getElementById('viewport-pill-text'),
     viewportError: document.getElementById('viewport-error'),
     viewportErrorTitle: document.getElementById('viewport-error-title'),
     viewportErrorBody: document.getElementById('viewport-error-body'),
@@ -368,15 +370,32 @@
 
   App.ui.buildExportObject = buildExportObject;
 
-  function flashLock() {
+  function flashLock(format) {
+    // Hide the idle instructional text for the duration of the flash —
+    // this used to only happen via startScanning() at the top of a live
+    // camera session, which left it visible (and unreadable under the
+    // flash tint) on every image-upload scan, since that path never goes
+    // through startScanning() at all.
+    els.viewportEmpty.hidden = true;
+
+    els.viewportPillText.textContent = format;
     els.viewportWrap.classList.add('is-locked');
-    window.setTimeout(function () { els.viewportWrap.classList.remove('is-locked'); }, 550);
+    els.viewportPill.classList.add('is-shown');
+
+    window.setTimeout(function () {
+      els.viewportWrap.classList.remove('is-locked');
+      els.viewportPill.classList.remove('is-shown');
+      // Only bring the idle text back if nothing else claimed the
+      // viewport in the meantime (e.g. a live scan started, or the
+      // error panel took over).
+      if (!scanning) els.viewportEmpty.hidden = false;
+    }, 550);
   }
 
   function handleDecodedResult(partialResult) {
     var result = runPipeline(partialResult);
     renderResult(result);
-    flashLock();
+    flashLock(result.format);
 
     if (App.state.settings.vibration && navigator.vibrate) {
       navigator.vibrate(80);
@@ -384,7 +403,11 @@
 
     setViewportStatus('Locked \u2014 ' + result.format);
     window.setTimeout(function () {
-      if (scanning) setViewportStatus('Scanning');
+      // Previously this only reset the label `if (scanning)`, which meant
+      // an image-upload scan (scanning is always false there) left the
+      // label frozen on "Locked — <format>" permanently. Now it falls
+      // back to Idle instead of leaving stale state on screen.
+      setViewportStatus(scanning ? 'Scanning' : 'Idle');
     }, LOCK_MS);
   }
 
