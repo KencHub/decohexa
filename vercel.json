@@ -6,5 +6,8 @@
         { "key": "Cache-Control", "value": "no-cache" }
       ]
     }
+  ],
+  "redirects": [
+    { "source": "/index.html", "destination": "/", "permanent": true }
   ]
 }
