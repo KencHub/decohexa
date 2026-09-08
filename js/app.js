@@ -54,6 +54,33 @@
   var ICON_PLAY = '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
   var ICON_STOP = '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
 
+  // ---- scan-success beep -----------------------------------------------
+  // Generated on the fly via the Web Audio API rather than an <audio> file
+  // — no asset to ship, nothing to add to sw.js's SHELL_FILES, and it
+  // works offline for free since it's pure code. A fresh AudioContext is
+  // created per beep (cheap, short-lived) rather than kept around, so
+  // there's no persistent audio node graph to manage/clean up between
+  // scans. Wrapped in try/catch: some browsers block audio until a user
+  // gesture has occurred on the page, or don't support Web Audio at all —
+  // either way, a blocked/missing beep should never break scanning itself.
+  function playBeep() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.type = 'sine';
+      osc.frequency.value = 880; // pitch (Hz) — a clean, high "ping"
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15); // quick fade-out
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch (err) { /* Web Audio unsupported or blocked — fail silently */ }
+  }
+
   var scanning = false;
   var rafHandle = null;
 
@@ -396,6 +423,10 @@
     var result = runPipeline(partialResult);
     renderResult(result);
     flashLock(result.format);
+
+    if (App.state.settings.sound) {
+      playBeep();
+    }
 
     if (App.state.settings.vibration && navigator.vibrate) {
       navigator.vibrate(80);
